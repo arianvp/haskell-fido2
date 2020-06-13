@@ -22,9 +22,10 @@ module Crypto.Fido2.Protocol
     AuthenticatorSelectionCriteria (..),
     AuthenticatorData (..),
     AttestationObject (..),
-    AttestedCredentialData (..),
     ClientData (..),
     CredentialId (..),
+    RpId (..),
+    Origin (..),
     URLEncodedBase64 (..),
     PublicKeyCredential (..),
     WebauthnType (..),
@@ -84,6 +85,12 @@ newtype UserId = UserId URLEncodedBase64
 -- enough
 newUserId :: MonadRandom m => m UserId
 newUserId = UserId . URLEncodedBase64 <$> Random.getRandomBytes 64
+
+newtype RpId = RpId { unRpId :: Text }
+  deriving newtype (Eq, FromJSON, ToJSON, Show)
+
+newtype Origin = Origin { unOrigin :: Text }
+  deriving newtype (Eq, FromJSON, ToJSON, Show)
 
 newtype Challenge = Challenge URLEncodedBase64
   deriving newtype (Eq, FromJSON, ToJSON, Show)
@@ -189,7 +196,7 @@ instance ToJSON AuthenticatorTransport where
 data PublicKeyCredentialDescriptor
   = PublicKeyCredentialDescriptor
       { typ :: PublicKeyCredentialType,
-        id :: URLEncodedBase64,
+        id :: CredentialId,
         transports :: Maybe [AuthenticatorTransport]
       }
   deriving stock (Generic, Show)
@@ -262,7 +269,7 @@ data UserVerificationRequirement
   = UserVerificationRequired
   | UserVerificationPreferred
   | UserVerificationDiscouraged
-  deriving stock (Generic, Show)
+  deriving stock (Generic, Show, Eq)
 
 instance ToJSON UserVerificationRequirement where
   toJSON = Aeson.String . \case
@@ -367,8 +374,8 @@ instance Aeson.FromJSON WebauthnType where
 data ClientData
   = ClientData
       { typ :: WebauthnType,
-        challenge :: URLEncodedBase64, -- base64url-decoded
-        origin :: Text,
+        challenge :: Challenge, -- base64url-decoded
+        origin :: Origin,
         clientDataHash :: Digest SHA256
         -- tokenBinding -- we don't implement so ignore
       }
@@ -386,8 +393,8 @@ clientDataParser hash = Aeson.withObject "ClientData" $ \o -> do
   origin <- o .: "origin"
   pure $ ClientData typ challenge origin hash
 
-newtype CredentialId = CredentialId ByteString
-  deriving newtype (Show)
+newtype CredentialId = CredentialId URLEncodedBase64
+  deriving newtype (Show, ToJSON)
 
 data AttestedCredentialData
   = AttestedCredentialData
@@ -492,7 +499,7 @@ decodeAuthenticatorData x = do
 -- attestedcredentialdataheader knallen we in deze
 decodeAttestedCredentialData :: AttestedCredentialDataHeader -> Decoder s AttestedCredentialData
 decodeAttestedCredentialData (AttestedCredentialDataHeader aaguid credentialId) = do
-  AttestedCredentialData aaguid (CredentialId credentialId) <$> keyDecoder
+  AttestedCredentialData aaguid (CredentialId (URLEncodedBase64 credentialId)) <$> keyDecoder
 
 -- error "beetje werk al gedaan. nu nog wat bytjes doen"
 

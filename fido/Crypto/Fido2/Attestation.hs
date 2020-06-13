@@ -13,9 +13,13 @@ import Control.Monad (when)
 import Crypto.Fido2.Protocol
   ( AttestationObject (AttestationObject, attStmt, authData, fmt),
     AttestedCredentialData,
+    UserVerificationRequirement(UserVerificationRequired),
     AuthenticatorAttestationResponse (AuthenticatorAttestationResponse, attestationObject, clientData),
     AuthenticatorData (AuthenticatorData, attestedCredentialData, rpIdHash, userPresent, userVerified),
+    Challenge,
     ClientData (ClientData, challenge, clientDataHash, origin, typ),
+    Origin,
+    RpId(unRpId),
     URLEncodedBase64 (),
     WebauthnType (Create),
   )
@@ -77,17 +81,17 @@ data AttestationResult = Trustworthy AttestedCredentialData | NotTrustworthy
 -- Steps 17, 18 and 19 should be taken care of by the caller of the API. The
 -- function returns all the information needed for these steps.
 verifyAttestationResponse ::
-  Text ->
-  Text ->
-  URLEncodedBase64 ->
-  Bool -> -- TODO: boolean blindness
+  Origin ->
+  RpId ->
+  Challenge ->
+  UserVerificationRequirement ->
   AuthenticatorAttestationResponse ->
   Either Error AttestationResult
 verifyAttestationResponse
   origin
   rpId
   challenge
-  userVerificationRequired
+  userVerificationRequirement
   AuthenticatorAttestationResponse {clientData, attestationObject} = do
     -- 1. Let JSONtext be the result of running UTF-8 decode on the value of
     -- response.clientDataJSON.
@@ -130,14 +134,14 @@ verifyAttestationResponse
     -- 9. Verify that the rpIdHash in authData is the SHA-256 hash of the RP ID
     -- expected by the Relying Party.
     let AuthenticatorData {rpIdHash} = authData
-    when (Hash.hash (Text.encodeUtf8 rpId) /= rpIdHash) $ Left RpIdMismatch
+    when (Hash.hash (Text.encodeUtf8 . unRpId $ rpId) /= rpIdHash) $ Left RpIdMismatch
     -- 10. Verify that the User Present bit of the flags in authData is set.
     let AuthenticatorData {userPresent} = authData
     when (not userPresent) $ Left UserNotPresent
     -- 11. If user verification is required for this registration, verify that
     -- the User Verified bit of the flags in authData is set.
     let AuthenticatorData {userVerified} = authData
-    when (userVerificationRequired && (not userVerified)) $ Left UserNotVerified
+    when (userVerificationRequirement == UserVerificationRequired && (not userVerified)) $ Left UserNotVerified
     -- 12. Verify that the values of the client extension outputs in
     -- clientExtensionResults and the authenticator extension outputs in the
     -- extensions in authData are as expected, considering the client extension
