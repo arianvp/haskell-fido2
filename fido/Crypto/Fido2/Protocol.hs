@@ -2,6 +2,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
@@ -19,8 +20,11 @@ module Crypto.Fido2.Protocol
     PublicKeyCredentialUserEntity (..),
     PublicKeyCredentialDescriptor (..),
     AuthenticatorSelectionCriteria (..),
+    AuthenticatorData (..),
     AttestationObject (..),
+    AttestedCredentialData (..),
     ClientData (..),
+    CredentialId (..),
     URLEncodedBase64 (..),
     PublicKeyCredential (..),
     WebauthnType (..),
@@ -382,10 +386,13 @@ clientDataParser hash = Aeson.withObject "ClientData" $ \o -> do
   origin <- o .: "origin"
   pure $ ClientData typ challenge origin hash
 
+newtype CredentialId = CredentialId ByteString
+  deriving newtype (Show)
+
 data AttestedCredentialData
   = AttestedCredentialData
       { aaguid :: ByteString, -- 16 byte
-        credentialId :: ByteString, -- Length L
+        credentialId :: CredentialId, -- Length L
         credentialPublicKey :: Ec2Key
       }
   deriving (Show)
@@ -402,12 +409,12 @@ data AttestedCredentialDataHeader
 -- not implement this.
 data AuthenticatorData
   = AuthenticatorData
-      { rpIdHash :: ByteString,
+      { rpIdHash :: Digest SHA256,
         -- , flags :: Word8
         counter :: Word32,
         userPresent :: Bool,
         userVerified :: Bool,
-        attestedCredentialData :: Maybe AttestedCredentialData -- Only present if bit 7 of flags is set, otherwise can be ignored
+        attestedCredentialData :: Maybe AttestedCredentialData -- Only present if bit 6 of flags is set, otherwise can be ignored
             -- TODO, better type?
             --
             -- We don't support extensions. so we don't check the ED flag
@@ -416,7 +423,7 @@ data AuthenticatorData
 
 data AuthenticatorDataRaw
   = AuthenticatorDataRaw
-      { rpIdHash' :: ByteString,
+      { rpIdHash' :: Digest SHA256,
         flags' :: Word8,
         counter' :: Word32,
         attestedCredentialDataHeader' :: Maybe AttestedCredentialDataHeader
@@ -429,16 +436,19 @@ data AuthenticatorDataRaw
 -- maybe this is also used for something else.
 data AttestationObjectRaw
   = AttestationObjectRaw
-      { authDataRaw :: ByteString
+      { authDataRaw :: ByteString,
+        fmt :: Text,
+        attStmt :: [(Term, Term)]
       }
   deriving (Show)
 
+data AttestationFormat = FormatNone deriving (Show)
+
 data AttestationObject
   = AttestationObject
-      { authData :: AuthenticatorData
-        -- TODO fmt
-        -- TODO attStatement
-        -- Currently only fmt: none is supported. we don't support attestation so we dont care
+      { authData :: AuthenticatorData,
+        fmt :: Text,
+        attStmt :: [(Term, Term)]
       }
   deriving (Show)
 
@@ -450,10 +460,10 @@ decodeAttestationObject bs = do
   -- First decode the high level structure with decodeAttestationObjectRaw.
   -- Pass the remaining bytes to decodeAuthenticatorData
   -- TODO maybe use the incremental API here?
-  (_rest, (AttestationObjectRaw bs')) <- first CBOR $ CBOR.deserialiseFromBytes decodeAttestationObjectRaw (LBS.fromStrict bs)
-  (rest, _, authDataRaw) <- first Binary $ Binary.runGetOrFail decodeAuthenticatorDataRaw (LBS.fromStrict bs')
+  (_rest, (AttestationObjectRaw {authDataRaw, fmt, attStmt})) <- first CBOR $ CBOR.deserialiseFromBytes decodeAttestationObjectRaw (LBS.fromStrict bs)
+  (rest, _, authDataRaw) <- first Binary $ Binary.runGetOrFail decodeAuthenticatorDataRaw (LBS.fromStrict authDataRaw)
   (_rest, authData) <- first CBOR $ CBOR.deserialiseFromBytes (decodeAuthenticatorData authDataRaw) rest
-  pure (AttestationObject authData)
+  pure (AttestationObject authData fmt attStmt)
 
 -- Helper. TODO  come up with more consistent names for all of these things, and allow
 -- for some code re-use?
@@ -482,13 +492,13 @@ decodeAuthenticatorData x = do
 -- attestedcredentialdataheader knallen we in deze
 decodeAttestedCredentialData :: AttestedCredentialDataHeader -> Decoder s AttestedCredentialData
 decodeAttestedCredentialData (AttestedCredentialDataHeader aaguid credentialId) = do
-  AttestedCredentialData aaguid credentialId <$> keyDecoder
+  AttestedCredentialData aaguid (CredentialId credentialId) <$> keyDecoder
 
 -- error "beetje werk al gedaan. nu nog wat bytjes doen"
 
 decodeAuthenticatorDataRaw :: Binary.Get AuthenticatorDataRaw
 decodeAuthenticatorDataRaw = do
-  rpIdHash <- Binary.getByteString 32
+  rpIdHash <- maybe (fail "invalid digest") pure =<< (Hash.digestFromByteString <$> Binary.getByteString 32)
   flags <- Binary.getWord8
   counter <- Binary.getWord32be
   -- If bit 6 is set, attested credential data is included.
@@ -515,13 +525,11 @@ getAttestedCredentialDataHeader = do
 decodeAttestationObjectRaw :: Decoder s AttestationObjectRaw
 decodeAttestationObjectRaw = do
   map :: HashMap Text Term <- Serialise.decode
-  when (HashMap.lookup "fmt" map /= Just (TString "none")) $ do
-    fail "no fmt none"
-  when (HashMap.lookup "attStmt" map /= Just (TMap [])) $ do
-    fail "attStmt not empty. which we expect when fmt is none"
+  TString fmt <- maybe (fail "no fmt") pure (HashMap.lookup "fmt" map)
+  TMap attStmt <- maybe (fail "no attStmt") pure (HashMap.lookup "attStmt" map)
   -- TODO flags should tell whether authData is present, no?
   TBytes authDataRaw <- maybe (fail "no authData") pure (HashMap.lookup "authData" map)
-  pure $ AttestationObjectRaw authDataRaw
+  pure $ AttestationObjectRaw authDataRaw fmt attStmt
 
 -- TODO Make more generic
 keyDecoder :: Decoder s Ec2Key
