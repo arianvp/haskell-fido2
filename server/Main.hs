@@ -15,6 +15,8 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..), runMaybeT)
 import Crypto.Fido2 as Fido2
 import qualified Crypto.Random as Random
+import Data.Aeson (FromJSON)
+import Data.Maybe (isNothing)
 import Data.Aeson.QQ (aesonQQ)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64.URL as Base64
@@ -29,6 +31,7 @@ import qualified Data.Text.Lazy.Encoding as LText
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
+import GHC.Generics (Generic)
 import Network.HTTP.Types as HTTP
 import qualified Network.HTTP.Types.Status as Status
 import Network.Wai.Middleware.Static (addBase, staticPolicy)
@@ -145,6 +148,13 @@ data User
       { credentials :: [AttestedCredentialData]
       }
 
+data BeginLoginRequest
+  = BeginLoginRequest
+      { blrUserId :: UserId
+      }
+  deriving stock (Generic)
+  deriving anyclass (FromJSON)
+
 isUnauthenticated :: Session -> Bool
 isUnauthenticated session = case session of
   Unauthenticated -> True
@@ -170,6 +180,14 @@ type Sessions = Map SessionId Session
 type SessionId = UUID
 
 type Users = Map UserId User
+
+getUserCredentials :: TVar Users -> UserId -> IO (Maybe [AttestedCredentialData])
+getUserCredentials users userId = do
+  contents <- STM.atomically $ STM.readTVar users
+  let user = Map.lookup userId contents
+  case user of
+    Just user -> pure $ Just $ credentials user
+    Nothing -> pure $ Nothing
 
 app :: TVar Sessions -> TVar Users -> ScottyM ()
 app sessions users = do
@@ -258,14 +276,17 @@ app sessions users = do
     Authenticated -> pure ()
     -}
 
-  Scotty.get "/login/begin" $ do
+  Scotty.post "/login/begin" $ do
     (sessionId, session) <- getSessionScotty sessions
     when
       (not . isUnauthenticated $ session)
       (Scotty.raiseStatus HTTP.status400 "You need to be unauthenticated to begin login")
+    userId <- blrUserId <$> Scotty.jsonData @BeginLoginRequest
     challenge <- liftIO $ newChallenge
-    -- Scotty.writeSession . Registering . Challenge $ challenge
-    identifier <- liftIO $ newUserId
+    allowedCredentials <- liftIO $ getUserCredentials users userId
+
+    when (isNothing allowedCredentials) Scotty.raiseStatus HTTP.status404 "User not found"
+
     Scotty.json $
       PublicKeyCredentialRequestOptions
         { rpId = Nothing,

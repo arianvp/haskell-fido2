@@ -76,7 +76,7 @@ import Data.Word
 import GHC.Generics (Generic, Rep)
 
 newtype UserId = UserId URLEncodedBase64
-  deriving newtype (Eq, FromJSON, ToJSON, Show)
+  deriving newtype (Eq, FromJSON, ToJSON, Ord, Show)
 
 -- | Webauthn highly suggets using 64 byte random strings for user-ids. Because
 -- we do not want people to shoot themselves in the foot, we suggest you to use
@@ -332,7 +332,7 @@ instance Aeson.FromJSON AuthenticatorAttestationResponse where
       pure $ AuthenticatorAttestationResponse clientData attestationObject'''
 
 newtype URLEncodedBase64 = URLEncodedBase64 ByteString
-  deriving newtype (Show, Eq)
+  deriving newtype (Eq, Ord, Show)
 
 instance Aeson.FromJSON URLEncodedBase64 where
   parseJSON = Aeson.withText "base64url" $ \t -> do
