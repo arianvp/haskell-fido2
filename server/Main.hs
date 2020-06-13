@@ -102,11 +102,23 @@ setSessionToRegistering :: TVar Sessions -> SessionId -> UserId -> Challenge -> 
 setSessionToRegistering sessions sessionId userId challenge =
   STM.atomically $ STM.modifyTVar sessions $ Map.adjust update sessionId
   where
-    -- Only update hte session to Registering when the session is Unauthenticated.
+    -- Only update the session to Registering when the session is Unauthenticated.
     -- This prevents race conditions where two concurrent register requests happen
     -- for the same session.
     update :: Session -> Session
     update (Unauthenticated) = Registering userId challenge
+    -- Keep the same state if there are racy calls to the /register endpoints.
+    update a = a
+
+setSessionToAuthenticating :: TVar Sessions -> SessionId -> Challenge -> IO ()
+setSessionToAuthenticating sessions sessionId challenge =
+  STM.atomically $ STM.modifyTVar sessions $ Map.adjust update sessionId
+  where
+    -- Only update the session to Registering when the session is Unauthenticated.
+    -- This prevents race conditions where two concurrent register requests happen
+    -- for the same session.
+    update :: Session -> Session
+    update (Unauthenticated) = Authenticating challenge
     -- Keep the same state if there are racy calls to the /register endpoints.
     update a = a
 
@@ -262,7 +274,7 @@ app sessions users = do
           allowCredentials = Nothing,
           userVerification = Nothing
         }
-    pure ()
+    liftIO $ setSessionToAuthenticating sessions sessionId challenge
   Scotty.post "/login/complete" $ do
     (sessionId, session) <- getSessionScotty sessions
     when
