@@ -86,10 +86,10 @@ newtype UserId = UserId URLEncodedBase64
 newUserId :: MonadRandom m => m UserId
 newUserId = UserId . URLEncodedBase64 <$> Random.getRandomBytes 64
 
-newtype RpId = RpId { unRpId :: Text }
+newtype RpId = RpId {unRpId :: Text}
   deriving newtype (Eq, FromJSON, ToJSON, Show)
 
-newtype Origin = Origin { unOrigin :: Text }
+newtype Origin = Origin {unOrigin :: Text}
   deriving newtype (Eq, FromJSON, ToJSON, Show)
 
 newtype Challenge = Challenge URLEncodedBase64

@@ -13,14 +13,14 @@ import Control.Monad (when)
 import Crypto.Fido2.Protocol
   ( AttestationObject (AttestationObject, attStmt, authData, fmt),
     AttestedCredentialData,
-    UserVerificationRequirement(UserVerificationRequired),
     AuthenticatorAttestationResponse (AuthenticatorAttestationResponse, attestationObject, clientData),
     AuthenticatorData (AuthenticatorData, attestedCredentialData, rpIdHash, userPresent, userVerified),
     Challenge,
     ClientData (ClientData, challenge, clientDataHash, origin, typ),
     Origin,
-    RpId(unRpId),
+    RpId (unRpId),
     URLEncodedBase64 (),
+    UserVerificationRequirement (UserVerificationRequired),
     WebauthnType (Create),
   )
 import qualified Crypto.Hash as Hash
