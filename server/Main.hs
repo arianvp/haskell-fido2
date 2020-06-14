@@ -169,8 +169,6 @@ type Sessions = Map SessionId Session
 
 type SessionId = UUID
 
-type Users = (Map Fido2.UserId User, Map Fido2.CredentialId Fido2.UserId)
-
 data RegisterBegin
   = RegisterBegin
       { name :: Text,
@@ -179,8 +177,8 @@ data RegisterBegin
   deriving (FromJSON) via (Fido2.EncodingRules RegisterBegin)
   deriving stock (Generic)
 
-app :: TVar Sessions -> TVar Users -> ScottyM ()
-app sessions users = do
+app :: Database.Connection -> TVar Sessions -> ScottyM ()
+app db sessions = do
   Scotty.middleware (staticPolicy (addBase "dist"))
   Scotty.post "/register/begin" $ do
     (sessionId, session) <- getSessionScotty sessions
@@ -223,14 +221,14 @@ app sessions users = do
           attestation = Nothing
         }
     liftIO $ setSessionToRegistering sessions sessionId userId challenge
-  Scotty.post "/register/complete" (finishRegistration sessions users)
+  Scotty.post "/register/complete" (finishRegistration db sessions)
   Scotty.post "/login/begin" $ do
     (sessionId, session) <- getSessionScotty sessions
     userId <- Scotty.jsonData @Fido2.UserId
-    muser <- liftIO $ STM.atomically $ do
-      (map, _) <- STM.readTVar users
-      pure $ Map.lookup userId map
-    User {credentials} <- maybe (Scotty.raiseStatus HTTP.status404 "User not found") pure muser
+    tx <- liftIO $ Database.begin db
+    theCredentials <- error "TODO(ruuda): Get credentials from db by user id." :: Scotty.ActionM [Fido2.CredentialId]
+    liftIO $ Database.commit tx
+    when (theCredentials == []) $ Scotty.raiseStatus HTTP.status404 "User not found"
     when
       (not . isUnauthenticated $ session)
       (Scotty.raiseStatus HTTP.status400 "You need to be unauthenticated to begin login")
@@ -242,7 +240,7 @@ app sessions users = do
         { rpId = Nothing,
           timeout = Nothing,
           challenge = challenge,
-          allowCredentials = Just (map mkCredentialDescriptor credentials),
+          allowCredentials = Just (map mkCredentialDescriptor theCredentials),
           userVerification = Nothing
         }
     pure ()
@@ -259,8 +257,12 @@ app sessions users = do
     when (not . isAuthenticated $ session) (Scotty.raiseStatus HTTP.status401 "Please authenticate first")
     Scotty.json @Text $ "This should only be visible when authenticated"
 
-mkCredentialDescriptor :: Fido2.AttestedCredentialData -> Fido2.PublicKeyCredentialDescriptor
-mkCredentialDescriptor Fido2.AttestedCredentialData {credentialId} = Fido2.PublicKeyCredentialDescriptor {typ = Fido2.PublicKey, id = credentialId, transports = Nothing}
+mkCredentialDescriptor :: Fido2.CredentialId -> Fido2.PublicKeyCredentialDescriptor
+mkCredentialDescriptor credentialId = Fido2.PublicKeyCredentialDescriptor
+  { typ = Fido2.PublicKey
+  , id = credentialId
+  , transports = Nothing
+  }
 
 data RegistrationResult
   = Success
@@ -272,8 +274,8 @@ handleError :: Show e => Either e a -> Scotty.ActionM a
 handleError (Left x) = Scotty.raiseStatus HTTP.status400 . fromStrict . pack . show $ x
 handleError (Right x) = pure x
 
-finishRegistration :: TVar Sessions -> TVar Users -> Scotty.ActionM ()
-finishRegistration sessions users = do
+finishRegistration :: Database.Connection -> TVar Sessions -> Scotty.ActionM ()
+finishRegistration db sessions = do
   (sessionId, session) <- getSessionScotty sessions
   case session of
     Registering userId challenge ->
@@ -288,28 +290,38 @@ finishRegistration sessions users = do
       Fido2.PublicKeyCredential {response} <- Scotty.jsonData
       -- step 1 to 17
       -- We abort if we couldn't attest the credential
-      attestedCredential@Fido2.AttestedCredentialData {credentialId} <-
-        handleError $
-          verifyAttestationResponse
-            serverOrigin
-            (Fido2.RpId domain)
-            challenge
-            Fido2.UserVerificationPreferred
-            response
+      attestedCredential@Fido2.AttestedCredentialData
+        { credentialId
+        , credentialPublicKey
+        } <- handleError $ verifyAttestationResponse
+          serverOrigin
+          (Fido2.RpId domain)
+          challenge
+          Fido2.UserVerificationPreferred
+          response
       -- if the credential was succesfully attested, we will see if the
       -- credential doesn't exist yet, and if it doesn't, insert it.
-      result <- liftIO . STM.atomically . runExceptT $ do
-        (userMap, credentialsIndex) <- lift . STM.readTVar $ users
-        when (Map.member credentialId credentialsIndex) $
-          throwError AlreadyRegistered
-        let existingCredentials = credentials <$> Map.lookup userId userMap
-        let updatedUser = User $ attestedCredential : (fromMaybe [] existingCredentials)
-        lift . STM.writeTVar users $
-          ( Map.insert userId updatedUser userMap,
-            Map.insert credentialId userId credentialsIndex
-          )
-        lift $ STM.modifyTVar sessions $ Map.insert sessionId (Authenticated userId)
-      handleError result
+      tx <- liftIO $ Database.begin db
+      existingUserId <- liftIO $ Database.getUserByCredentialId tx credentialId
+      case existingUserId of
+        Nothing -> pure ()
+        -- TODO(ruuda): Handle the case of the user existing,
+        -- in that case we do not want to insert the user again,
+        -- but we do want to add a new credential.
+        Just existingUserId | userId == existingUserId -> pure ()
+        Just _differentUserId -> handleError $ Left AlreadyRegistered
+      let
+        -- TODO: Put username and display name in the session on begin,
+        -- so we can get it back here.
+        fakeUser = Fido2.PublicKeyCredentialUserEntity
+          { Fido2.displayName = "Frederik Frederikson"
+          , Fido2.name = "Frederik Frederikson"
+          , Fido2.id = userId
+          }
+      liftIO $ do
+        Database.addUserWithAttestedCredentialData tx fakeUser credentialId credentialPublicKey
+        STM.atomically $ STM.modifyTVar sessions $ Map.insert sessionId (Authenticated userId)
+        Database.commit tx
 
 port :: Int
 port = 8080
@@ -325,6 +337,5 @@ main = do
   db <- Database.connect
   Database.initialize db
   sessions <- STM.newTVarIO Map.empty
-  users <- STM.newTVarIO (Map.empty, Map.empty)
   putStrLn "You can view the web-app at: http://localhost:8080/index.html"
-  Scotty.scotty port (app sessions users)
+  Scotty.scotty port $ app db sessions
