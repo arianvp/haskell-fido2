@@ -188,6 +188,12 @@ app db sessions = do
       (Scotty.raiseStatus HTTP.status400 "You need to be unauthenticated to begin registration")
     challenge <- liftIO $ Fido2.newChallenge
     userId <- liftIO $ Fido2.newUserId
+    let user =
+          Fido2.PublicKeyCredentialUserEntity
+            { id = userId,
+              displayName = displayName,
+              name = name
+            }
     Scotty.json $
       Fido2.PublicKeyCredentialCreationOptions
         { rp =
@@ -195,12 +201,7 @@ app db sessions = do
               { id = Nothing,
                 name = "ACME"
               },
-          user =
-            Fido2.PublicKeyCredentialUserEntity
-              { id = userId,
-                displayName = displayName,
-                name = name
-              },
+          user = user,
           challenge = challenge,
           pubKeyCredParams =
             [ Fido2.PublicKeyCredentialParameters
@@ -219,14 +220,20 @@ app db sessions = do
                 },
           attestation = Nothing
         }
-    liftIO $ setSessionToRegistering sessions sessionId userId challenge
+    liftIO $ do
+      tx <- Database.begin db
+      Database.addUser tx user
+      Database.commit tx
+      setSessionToRegistering sessions sessionId userId challenge
   Scotty.post "/register/complete" (finishRegistration db sessions)
   Scotty.post "/login/begin" $ do
     (sessionId, session) <- getSessionScotty sessions
     userId <- Scotty.jsonData @Fido2.UserId
-    tx <- liftIO $ Database.begin db
-    theCredentials <- error "TODO(ruuda): Get credentials from db by user id." :: Scotty.ActionM [Fido2.CredentialId]
-    liftIO $ Database.commit tx
+    theCredentials <- liftIO $ do
+      tx <- Database.begin db
+      cr <- Database.getCredentialsByUserId tx userId
+      Database.commit tx
+      pure cr
     when (theCredentials == []) $ Scotty.raiseStatus HTTP.status404 "User not found"
     when
       (not . isUnauthenticated $ session)
@@ -312,16 +319,8 @@ finishRegistration db sessions = do
         -- but we do want to add a new credential.
         Just existingUserId | userId == existingUserId -> pure ()
         Just _differentUserId -> handleError $ Left AlreadyRegistered
-      let -- TODO: Put username and display name in the session on begin,
-          -- so we can get it back here.
-          fakeUser =
-            Fido2.PublicKeyCredentialUserEntity
-              { Fido2.displayName = "Frederik Frederikson",
-                Fido2.name = "Frederik Frederikson",
-                Fido2.id = userId
-              }
       liftIO $ do
-        Database.addUserWithAttestedCredentialData tx fakeUser credentialId credentialPublicKey
+        Database.addAttestedCredentialData tx userId credentialId credentialPublicKey
         STM.atomically $ STM.modifyTVar sessions $ Map.insert sessionId (Authenticated userId)
         Database.commit tx
 

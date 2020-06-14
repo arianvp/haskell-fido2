@@ -119,18 +119,6 @@ addAttestedCredentialData
         Fido2.y publicKey
       )
 
-addUserWithAttestedCredentialData ::
-  Transaction ->
-  Fido2.PublicKeyCredentialUserEntity ->
-  Fido2.CredentialId ->
-  Fido2.Ec2Key ->
-  IO ()
-addUserWithAttestedCredentialData tx user credentialId publicKey =
-  let Fido2.PublicKeyCredentialUserEntity {id = userId} = user
-   in do
-        addUser tx user
-        addAttestedCredentialData tx userId credentialId publicKey
-
 getUserByCredentialId :: Transaction -> Fido2.CredentialId -> IO (Maybe Fido2.UserId)
 getUserByCredentialId
   (Transaction conn)
