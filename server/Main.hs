@@ -37,6 +37,8 @@ import qualified Web.Cookie as Cookie
 import Web.Scotty (ScottyM)
 import qualified Web.Scotty as Scotty
 
+import qualified Database
+
 -- Generate a new session for the current user and expose it as a @SetCookie@.
 newSession :: TVar Sessions -> IO (SessionId, Session, Cookie.SetCookie)
 newSession sessions = do
@@ -320,6 +322,8 @@ serverOrigin = Fido2.Origin $ "http://" <> domain <> ":" <> (pack $ show port)
 
 main :: IO ()
 main = do
+  db <- Database.connect
+  Database.initialize db
   sessions <- STM.newTVarIO Map.empty
   users <- STM.newTVarIO (Map.empty, Map.empty)
   putStrLn "You can view the web-app at: http://localhost:8080/index.html"

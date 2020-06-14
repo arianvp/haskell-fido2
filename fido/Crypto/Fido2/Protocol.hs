@@ -30,6 +30,7 @@ module Crypto.Fido2.Protocol
     PublicKeyCredential (..),
     WebauthnType (..),
     UserId (..),
+    Ec2Key (..),
     newUserId,
     Challenge,
     newChallenge,
