@@ -10,6 +10,8 @@ module Database
   , commit
   , connect
   , getUserByCredentialId
+  , getCredentialsByUserId
+  , getPublicKeyByCredentialId
   , initialize
   , rollback
   )
@@ -141,3 +143,28 @@ getUserByCredentialId
       []                   -> pure Nothing
       [Sqlite.Only userId] -> pure $ Just $ UserId $ URLEncodedBase64 $ userId
       _ -> fail "Unreachable: attested_credential_data.id has a unique index."
+
+getCredentialsByUserId :: Transaction -> Fido2.UserId -> IO [Fido2.CredentialId]
+getCredentialsByUserId (Transaction conn) (UserId (URLEncodedBase64 userId)) = do
+  credentialIds <- Sqlite.query
+    conn
+    "select id from attested_credential_data where user_id = ?;"
+    [userId]
+  pure $ fmap (CredentialId . URLEncodedBase64) credentialIds
+
+getPublicKeyByCredentialId
+  :: Transaction
+  -> Fido2.CredentialId
+  -> IO (Maybe Fido2.Ec2Key)
+getPublicKeyByCredentialId
+  (Transaction conn)
+  (CredentialId (URLEncodedBase64 credentialId)) = do
+    result <- Sqlite.query
+      conn
+      " select (public_key_curve, public_key_x, public_key_y) \
+      \ from attested_credential_data                         \
+      \ where id = ?;                                         "
+      [credentialId]
+    case result of
+      []              -> pure Nothing
+      [(curve, x, y)] -> pure $ Just $ Fido2.Ec2Key { curve, x, y }
