@@ -16,7 +16,6 @@ import Control.Monad.Trans.Maybe (MaybeT (..), runMaybeT)
 import Crypto.Fido2 as Fido2
 import qualified Crypto.Random as Random
 import Data.Aeson (FromJSON)
-import Data.Maybe (isNothing)
 import Data.Aeson.QQ (aesonQQ)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64.URL as Base64
@@ -26,6 +25,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.List.NonEmpty
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (isNothing)
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Lazy.Encoding as LText
 import Data.UUID (UUID)
@@ -145,7 +145,7 @@ data Session
 
 data User
   = User
-      { credentials :: [AttestedCredentialData]
+      { publicKeys :: [PublicKeyCredentialDescriptor]
       }
 
 data BeginLoginRequest
@@ -181,12 +181,12 @@ type SessionId = UUID
 
 type Users = Map UserId User
 
-getUserCredentials :: TVar Users -> UserId -> IO (Maybe [AttestedCredentialData])
-getUserCredentials users userId = do
+getUserPubkeys :: TVar Users -> UserId -> IO (Maybe [PublicKeyCredentialDescriptor])
+getUserPubkeys users userId = do
   contents <- STM.atomically $ STM.readTVar users
   let user = Map.lookup userId contents
   case user of
-    Just user -> pure $ Just $ credentials user
+    Just user -> pure $ Just $ publicKeys user
     Nothing -> pure $ Nothing
 
 app :: TVar Sessions -> TVar Users -> ScottyM ()
@@ -283,16 +283,14 @@ app sessions users = do
       (Scotty.raiseStatus HTTP.status400 "You need to be unauthenticated to begin login")
     userId <- blrUserId <$> Scotty.jsonData @BeginLoginRequest
     challenge <- liftIO $ newChallenge
-    allowedCredentials <- liftIO $ getUserCredentials users userId
-
-    when (isNothing allowedCredentials) Scotty.raiseStatus HTTP.status404 "User not found"
-
+    publicKeys <- liftIO $ getUserPubkeys users userId
+    when (isNothing publicKeys) (Scotty.raiseStatus HTTP.status404 "User not found")
     Scotty.json $
       PublicKeyCredentialRequestOptions
         { rpId = Nothing,
           timeout = Nothing,
           challenge = challenge,
-          allowCredentials = Nothing,
+          allowCredentials = publicKeys,
           userVerification = Nothing
         }
     liftIO $ setSessionToAuthenticating sessions sessionId challenge
