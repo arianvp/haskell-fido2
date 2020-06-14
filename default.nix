@@ -26,7 +26,6 @@ then haskellPackages.fido2.env.overrideAttrs (
   x: {
     buildInputs = x.buildInputs ++ [
       pkgs.entr
-      pkgs.yarn
       pkgs.cabal-install
       pkgs.cabal2nix
       pkgs.fd

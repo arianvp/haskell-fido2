@@ -159,7 +159,14 @@ type Users = (Map Fido2.UserId User, Map Fido2.CredentialId Fido2.UserId)
 
 app :: TVar Sessions -> TVar Users -> ScottyM ()
 app sessions users = do
-  Scotty.middleware (staticPolicy (addBase "dist"))
+  Scotty.get "/index.html" $ do
+    Scotty.setHeader "content-type" "text/html; charset=utf-8"
+    Scotty.file "index.html"
+
+  Scotty.get "/index.js" $ do
+    Scotty.setHeader "content-type" "application/javascript"
+    Scotty.file "index.js"
+
   Scotty.get "/register/begin" $ do
     (sessionId, session) <- getSessionScotty sessions
     -- NOTE: We currently do not support multiple credentials per user.
