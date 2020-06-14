@@ -13,8 +13,8 @@ import qualified Control.Concurrent.STM as STM
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
-import qualified Crypto.Fido2.Protocol as Fido2
 import Crypto.Fido2.Attestation (Error, verifyAttestationResponse)
+import qualified Crypto.Fido2.Protocol as Fido2
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as LBS
 import Data.Map (Map)
@@ -199,43 +199,6 @@ app sessions users = do
         }
     liftIO $ setSessionToRegistering sessions sessionId userId challenge
   Scotty.post "/register/complete" (handleRegistration sessions users)
-  {-
-  case session of
-    Unauthenticated -> do
-      Scotty.setStatus  Status.status401
-      pure ()
-    Registering challenge -> do
-      let clientData' :: ClientData = Fido2.clientData (response credential)
-      let challenge' = Fido2.challenge (clientData' :: ClientData)
-      -- step 3
-      if Fido2.typ (clientData' :: ClientData) /= Createj
-      then do
-        Scotty.setStatus Status.status401
-        Scotty.text "typ mismatch"
-      -- step 4
-      else if challenge /= (Challenge  challenge')
-      then do
-        Scotty.setStatus Status.status401
-        Scotty.text "challenge mismatch"
-      -- step 5
-      else if (Fido2.origin clientData') /= "http://localhost:8080"
-      then do
-        Scotty.setStatus Status.status401
-        Scotty.text "origin mismatch"
-      else do
-        -- skip step 6 for now
-        Scotty.writeSession Authenticated
-        pure ()
-        -- step 7 we get for free
-        --
-    Authenticating challenge -> do
-      -- We should merge /login/complete and /register/complete. Same code here. Dual
-      Scotty.setStatus  Status.status401
-      Scotty.text "authenticating"
-      pure ()
-    Authenticated -> pure ()
-    -}
-
   Scotty.get "/login/begin" $ do
     (_sessionId, session) <- getSessionScotty sessions
     when
@@ -261,6 +224,10 @@ app sessions users = do
     credential <- Scotty.jsonData @(Fido2.PublicKeyCredential Fido2.AuthenticatorAssertionResponse)
     liftIO . print $ credential
     pure ()
+  Scotty.get "/requires-auth" $ do
+    (_sessionId, session) <- getSessionScotty sessions
+    when (not . isAuthenticated $ session) (Scotty.raiseStatus HTTP.status401 "Please authenticate first")
+    Scotty.json @Text $ "This should only be visible when authenticated"
 
 data RegistrationResult = Success | AlreadyRegistered | AttestationError Error deriving (Eq, Show)
 
