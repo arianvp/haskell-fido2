@@ -42,11 +42,13 @@ library
     unordered-containers,
     x509,
     scientific,
-    vector
+    vector,
+    QuickCheck
   exposed-modules:
     Crypto.Fido2.Assertion,
     Crypto.Fido2.Attestation,
     Crypto.Fido2.Protocol,
+    Crypto.Fido2.PublicKey
 
 executable server
   import: sanity
@@ -58,7 +60,7 @@ executable server
     aeson,
     aeson-qq,
     base64-bytestring,
-    binary,
+    cborg,
     bytestring,
     containers,
     cookie,
@@ -87,4 +89,6 @@ test-suite tests
     directory,
     fido2,
     filepath,
+    QuickCheck,
     hspec,
+    cborg

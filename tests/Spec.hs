@@ -9,9 +9,12 @@ module Main
   )
 where
 
+import qualified Codec.CBOR.Read as CBOR
+import qualified Codec.CBOR.Write as CBOR
 import qualified Crypto.Fido2.Assertion as Fido2
 import qualified Crypto.Fido2.Attestation as Fido2
 import qualified Crypto.Fido2.Protocol as Fido2
+import qualified Crypto.Fido2.PublicKey as PublicKey
 import Data.Aeson (FromJSON)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
@@ -23,6 +26,7 @@ import qualified System.Directory as Directory
 import System.FilePath ((</>))
 import Test.Hspec (Spec, describe, it, shouldSatisfy)
 import qualified Test.Hspec as Hspec
+import Test.QuickCheck (property)
 
 -- Load all files in the given directory, and ensure that all of them can be
 -- decoded. The caller can pass in a function to run further checks on the
@@ -53,6 +57,12 @@ main = Hspec.hspec $ do
       @(Fido2.PublicKeyCredential Fido2.AuthenticatorAssertionResponse)
       "tests/fixtures/login-complete"
       ignoreDecodedValue
+  describe "PublicKey" $ do
+    it "roundtrips" $ do
+      property $ \key -> do
+        let bs = CBOR.toLazyByteString (PublicKey.encodePublicKey key)
+        let rs = snd <$> CBOR.deserialiseFromBytes PublicKey.decodePublicKey bs
+        rs == pure key
   describe "Attestation"
     $ it "tests whether the fixed register and login responses are matching"
     $ do
@@ -78,7 +88,6 @@ main = Hspec.hspec $ do
       let Fido2.PublicKeyCredential {response} = loginReq
       let Fido2.AuthenticatorAssertionResponse {clientData} = response
       let Fido2.ClientData {challenge} = clientData
-      print $ response
       let signInResult =
             Fido2.verifyAssertionResponse
               Fido2.RelyingPartyConfig {origin = Fido2.Origin "http://localhost:8080", rpId = Fido2.RpId "localhost"}

@@ -10,6 +10,8 @@ where
 
 import Control.Monad (when)
 import qualified Crypto.Fido2.Protocol as Fido2
+import qualified Crypto.Fido2.PublicKey as PublicKey
+import Crypto.Fido2.PublicKey (PublicKey)
 import qualified Crypto.Hash as Hash
 import qualified Data.ByteArray as BA
 import qualified Data.List as List
@@ -30,7 +32,7 @@ data Error
 
 -- | Domain type: combination of a user's ID and publickey. This should be eventually
 -- extracted into some opinionated module that builds on top of the actual protocol types.
-data Credential = Credential {id :: Fido2.CredentialId, publicKey :: Fido2.PublicKey}
+data Credential = Credential {id :: Fido2.CredentialId, publicKey :: PublicKey}
 
 -- | Domain type: configuration for our relying party. Should eventually be moved to
 -- some other opinionated module.
@@ -97,5 +99,5 @@ verifyAssertionResponse
     rawData' <- maybe (Left RawDataUnavailable) pure rawData
     let msg = rawData' <> (BA.convert clientDataHash)
         (Fido2.URLEncodedBase64 sig) = signature
-        verifyResult = Fido2.verifyEcdsa publicKey msg sig
+        verifyResult = PublicKey.verify publicKey msg sig
     when (not verifyResult) (Left InvalidSignature)
