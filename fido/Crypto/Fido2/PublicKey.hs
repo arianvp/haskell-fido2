@@ -44,13 +44,16 @@ data ECDSAIdentifier
   | ES512
   deriving (Show, Eq)
 
+instance Arbitrary ECDSAIdentifier where
+  arbitrary = elements [ES256, ES384, ES512]
+
 data COSEAlgorithmIdentifier
   = ECDSAIdentifier ECDSAIdentifier
   | EdDSA
   deriving (Show, Eq)
 
 instance Arbitrary COSEAlgorithmIdentifier where
-  arbitrary = oneof [pure EdDSA, ECDSAIdentifier <$> elements [ES256, ES384, ES512]]
+  arbitrary = oneof [pure EdDSA, arbitrary]
 
 -- All CBOR is encoded using
 -- https://fidoalliance.org/specs/fido-v2.0-id-20180227/fido-client-to-authenticator-protocol-v2.0-id-20180227.html#ctap2-canonical-cbor-encoding-form
@@ -82,37 +85,49 @@ data EdDSAKey
 instance Arbitrary EdDSAKey where
   arbitrary =
     oneof
-      [ Ed25519 <$> randomKey1,
-        Ed448 <$> randomKey2
+      [ Ed25519 <$> randomEd25519PublicKey,
+        Ed448 <$> randomEd448PublicKey
       ]
 
-randomKey1 :: Gen Ed25519.PublicKey
-randomKey1 = do
+randomEd25519PublicKey :: Gen Ed25519.PublicKey
+randomEd25519PublicKey = do
   rng <- drgNewSeed . seedFromInteger <$> arbitrary
   let (a, _) = withDRG rng (Ed25519.toPublic <$> Ed25519.generateSecretKey)
   pure a
 
-randomKey2 :: Gen Ed448.PublicKey
-randomKey2 = do
+randomEd448PublicKey :: Gen Ed448.PublicKey
+randomEd448PublicKey = do
   rng <- drgNewSeed . seedFromInteger <$> arbitrary
   let (a, _) = withDRG rng (Ed448.toPublic <$> Ed448.generateSecretKey)
   pure a
 
-randomKey3 :: Gen ECDSA.PublicKey
-randomKey3 = do
-  curve <- elements [ECC.SEC_p256r1, ECC.SEC_p384r1, ECC.SEC_p521r1]
+randomECDSAPublicKey :: Gen (CurveIdentifier, ECC.Point)
+randomECDSAPublicKey = do
+  curveIdentifier <- arbitrary
+  let curve = toCurve curveIdentifier
   rng <- drgNewSeed . seedFromInteger <$> arbitrary
-  let ((pub, _), _) = withDRG rng (ECC.generate (ECC.getCurveByName curve))
-  pure pub
+  let ((ECDSA.PublicKey _ point, _), _) = withDRG rng (ECC.generate curve)
+  pure (curveIdentifier, point)
 
-data ECDSAKey = ECDSAKey ECDSAIdentifier ECDSA.PublicKey deriving (Eq, Show)
+-- Curves supported by us
+data CurveIdentifier = P256 | P384 | P521 deriving (Eq, Show)
+
+instance Arbitrary CurveIdentifier where
+  arbitrary = elements [P256, P384, P521]
+
+toCurve :: CurveIdentifier -> ECC.Curve
+toCurve P256 = ECC.getCurveByName ECC.SEC_p256r1
+toCurve P384 = ECC.getCurveByName ECC.SEC_p384r1
+toCurve P521 = ECC.getCurveByName ECC.SEC_p521r1
+
+data ECDSAKey = ECDSAKey ECDSAIdentifier CurveIdentifier ECC.Point deriving (Eq, Show)
 
 instance Arbitrary ECDSAKey where
   arbitrary =
     oneof
-      [ ECDSAKey ES256 <$> randomKey3,
-        ECDSAKey ES384 <$> randomKey3,
-        ECDSAKey ES512 <$> randomKey3
+      [ uncurry (ECDSAKey ES256) <$> randomECDSAPublicKey,
+        uncurry (ECDSAKey ES384) <$> randomECDSAPublicKey,
+        uncurry (ECDSAKey ES512) <$> randomECDSAPublicKey
       ]
 
 data PublicKey
@@ -180,9 +195,9 @@ decodeECDSAPublicKey = do
   when (crvKey /= (-1)) $ fail "Expected required `crv`"
   crv <- CBOR.decodeIntCanonical
   curve <- case crv of
-    1 -> pure $ ECC.getCurveByName ECC.SEC_p256r1
-    2 -> pure $ ECC.getCurveByName ECC.SEC_p384r1
-    3 -> pure $ ECC.getCurveByName ECC.SEC_p521r1
+    1 -> pure $ P256
+    2 -> pure $ P384
+    3 -> pure $ P521
     _ -> fail "Unsupported `crv`"
   xKey <- CBOR.decodeIntCanonical
   when (xKey /= -2) $ fail "Expected required `x`"
@@ -198,11 +213,11 @@ decodeECDSAPublicKey = do
     CBOR.TypeBytes -> os2ip <$> CBOR.decodeBytesCanonical
     _ -> fail "Unexpected token type"
   let point = ECC.Point x y
-  when (not (ECC.isPointValid curve point)) $ fail "point not on curve"
-  pure $ ECDSAKey hash (ECDSA.PublicKey curve (ECC.Point x y))
+  when (not (ECC.isPointValid (toCurve curve) point)) $ fail "point not on curve"
+  pure $ ECDSAKey hash curve (ECC.Point x y)
 
 encodePublicKey :: PublicKey -> Encoding
-encodePublicKey (ECDSAPublicKey (ECDSAKey alg (ECDSA.PublicKey curve point))) =
+encodePublicKey (ECDSAPublicKey (ECDSAKey alg curve point)) =
   CBOR.encodeMapLen 5
     <> CBOR.encodeInt 1
     <> CBOR.encodeInt 2
@@ -211,10 +226,9 @@ encodePublicKey (ECDSAPublicKey (ECDSAKey alg (ECDSA.PublicKey curve point))) =
     <> CBOR.encodeInt (-1)
     <> CBOR.encodeInt
       ( case curve of
-          curve | curve == ECC.getCurveByName ECC.SEC_p256r1 -> 1
-          curve | curve == ECC.getCurveByName ECC.SEC_p384r1 -> 2
-          curve | curve == ECC.getCurveByName ECC.SEC_p521r1 -> 3
-          _ | otherwise -> error "never happens"
+          P256 -> 1
+          P384 -> 2
+          P521 -> 3
       )
     <> ( case point of
            ECC.Point x y ->
@@ -262,14 +276,15 @@ decodeECDSASignature sigbs =
 verify :: PublicKey -> ByteString -> ByteString -> Bool
 verify key msg sig =
   case key of
-    ECDSAPublicKey (ECDSAKey alg key) ->
-      case decodeECDSASignature sig of
-        Nothing -> False
-        Just sig ->
-          case alg of
-            ES256 -> ECDSA.verify Hash.SHA256 key sig msg
-            ES384 -> ECDSA.verify Hash.SHA384 key sig msg
-            ES512 -> ECDSA.verify Hash.SHA512 key sig msg
+    ECDSAPublicKey (ECDSAKey alg curve point) ->
+      let key = ECDSA.PublicKey (toCurve curve) point
+       in case decodeECDSASignature sig of
+            Nothing -> False
+            Just sig ->
+              case alg of
+                ES256 -> ECDSA.verify Hash.SHA256 key sig msg
+                ES384 -> ECDSA.verify Hash.SHA384 key sig msg
+                ES512 -> ECDSA.verify Hash.SHA512 key sig msg
     EdDSAPublicKey (Ed25519 key) ->
       case Ed25519.signature sig of
         CryptoPassed sig -> Ed25519.verify key msg sig
