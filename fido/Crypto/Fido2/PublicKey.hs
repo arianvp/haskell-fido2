@@ -138,6 +138,21 @@ data PublicKey
 instance Arbitrary PublicKey where
   arbitrary = oneof [EdDSAPublicKey <$> arbitrary, ECDSAPublicKey <$> arbitrary]
 
+data KeyType = OKP | ECC
+
+decodeKeyType :: Decoder s KeyType
+decodeKeyType = do
+  kty <- CBOR.decodeIntCanonical
+  case kty of
+    1 -> pure OKP
+    2 -> pure ECC
+    x -> fail $ "unexpected kty: " ++ show x
+
+encodeKeyType :: KeyType -> Encoding
+encodeKeyType kty = CBOR.encodeInt $ case kty of
+  OKP -> 1
+  ECC -> 2
+
 -- | The credential public key encoded in COSE_Key format, as defined in Section 7
 -- of [RFC8152], using the CTAP2 canonical CBOR encoding form. The
 -- COSE_Key-encoded credential public key MUST contain the "alg" parameter and
@@ -152,25 +167,20 @@ instance Arbitrary PublicKey where
 decodePublicKey :: Decoder s PublicKey
 decodePublicKey = do
   _n <- CBOR.decodeMapLenCanonical
-  ktyKey <- CBOR.decodeIntCanonical
-  when (ktyKey /= 1) $ fail "Expected required `kty`"
-  kty <- CBOR.decodeIntCanonical
+  decodeMapKey Kty
+  kty <- decodeKeyType
   case kty of
-    1 -> EdDSAPublicKey <$> decodeEdDSAKey
-    2 -> ECDSAPublicKey <$> decodeECDSAPublicKey
-    x -> fail $ "unexpected kty: " ++ show x
+    OKP -> EdDSAPublicKey <$> decodeEdDSAKey
+    ECC -> ECDSAPublicKey <$> decodeECDSAPublicKey
 
 decodeEdDSAKey :: Decoder s EdDSAKey
 decodeEdDSAKey = do
-  algKey <- CBOR.decodeIntCanonical
-  when (algKey /= 3) $ fail "Expected required `alg`"
+  decodeMapKey Alg
   alg <- decodeCOSEAlgorithmIdentifier
   when (alg /= EdDSA) $ fail "Unsupported `alg`"
-  crvKey <- CBOR.decodeIntCanonical
-  when (crvKey /= (-1)) $ fail "Expected required `crv`"
+  decodeMapKey Crv
   crv <- CBOR.decodeIntCanonical
-  xKey <- CBOR.decodeIntCanonical
-  when (xKey /= -2) $ fail "Expected required `x`"
+  decodeMapKey X
   x <- CBOR.decodeBytesCanonical
   case crv of
     6 ->
@@ -183,27 +193,33 @@ decodeEdDSAKey = do
         CryptoPassed a -> pure $ Ed448 a
     _ -> fail "Unsupported `crv`"
 
-decodeECDSAPublicKey :: Decoder s ECDSAKey
-decodeECDSAPublicKey = do
-  algKey <- CBOR.decodeIntCanonical
-  when (algKey /= 3) $ fail "Expected required `alg`"
-  alg <- decodeCOSEAlgorithmIdentifier
-  hash <- case alg of
-    ECDSAIdentifier x -> pure x
-    _ -> fail "Unsupported `alg`"
-  crvKey <- CBOR.decodeIntCanonical
-  when (crvKey /= (-1)) $ fail "Expected required `crv`"
+encodeCurveIdentifier :: CurveIdentifier -> Encoding
+encodeCurveIdentifier crv = CBOR.encodeInt $ case crv of
+  P256 -> 1
+  P384 -> 2
+  P521 -> 3
+
+decodeCurveIdentifier :: Decoder s CurveIdentifier
+decodeCurveIdentifier = do
   crv <- CBOR.decodeIntCanonical
-  curve <- case crv of
+  case crv of
     1 -> pure $ P256
     2 -> pure $ P384
     3 -> pure $ P521
     _ -> fail "Unsupported `crv`"
-  xKey <- CBOR.decodeIntCanonical
-  when (xKey /= -2) $ fail "Expected required `x`"
+
+decodeECDSAPublicKey :: Decoder s ECDSAKey
+decodeECDSAPublicKey = do
+  decodeMapKey Alg
+  alg <- decodeCOSEAlgorithmIdentifier
+  hash <- case alg of
+    ECDSAIdentifier x -> pure x
+    _ -> fail "Unsupported `alg`"
+  decodeMapKey Crv
+  curve <- decodeCurveIdentifier
+  decodeMapKey X
   x <- os2ip <$> CBOR.decodeBytesCanonical
-  yKey <- CBOR.decodeIntCanonical
-  when (yKey /= -3) $ fail "Expected required `x`"
+  decodeMapKey Y
   tokenType <- CBOR.peekTokenType
   y <- case tokenType of
     -- TODO(arianvp): Implement compressed curve. Waiting for
@@ -216,43 +232,57 @@ decodeECDSAPublicKey = do
   when (not (ECC.isPointValid (toCurve curve) point)) $ fail "point not on curve"
   pure $ ECDSAKey hash curve (ECC.Point x y)
 
+data MapKey = Kty | Alg | Crv | X | Y deriving (Show, Eq)
+
+mapKeyToInt :: MapKey -> Int
+mapKeyToInt key = case key of
+  Kty -> 1
+  Alg -> 3
+  Crv -> -1
+  X -> -2
+  Y -> -3
+
+encodeMapKey :: MapKey -> Encoding
+encodeMapKey = CBOR.encodeInt . mapKeyToInt
+
+decodeMapKey :: MapKey -> Decoder s ()
+decodeMapKey key = do
+  key' <- CBOR.decodeIntCanonical
+  when (mapKeyToInt key /= key') $ fail $ "Expected " ++ show key
+
 encodePublicKey :: PublicKey -> Encoding
 encodePublicKey (ECDSAPublicKey (ECDSAKey alg curve point)) =
   CBOR.encodeMapLen 5
-    <> CBOR.encodeInt 1
-    <> CBOR.encodeInt 2
-    <> CBOR.encodeInt 3
+    <> encodeMapKey Kty
+    <> encodeKeyType ECC
+    <> encodeMapKey Alg
     <> encodeCOSEAlgorithmIdentifier (ECDSAIdentifier alg)
-    <> CBOR.encodeInt (-1)
-    <> CBOR.encodeInt
-      ( case curve of
-          P256 -> 1
-          P384 -> 2
-          P521 -> 3
-      )
+    <> encodeMapKey Crv
+    <> encodeCurveIdentifier curve
     <> ( case point of
            ECC.Point x y ->
-             CBOR.encodeInt (-2)
+             encodeMapKey X
                <> CBOR.encodeBytes (i2osp x)
-               <> CBOR.encodeInt (-3)
+               <> encodeMapKey Y
                <> CBOR.encodeBytes (i2osp y)
            _ -> error "never happens"
        )
 encodePublicKey (EdDSAPublicKey key) =
   CBOR.encodeMapLen 4
-    <> CBOR.encodeInt 1
-    <> CBOR.encodeInt 1
-    <> CBOR.encodeInt 3
+    <> encodeMapKey Kty
+    <> encodeKeyType OKP
+    <> encodeMapKey Alg
     <> encodeCOSEAlgorithmIdentifier EdDSA
-    <> CBOR.encodeInt (-1)
     <> case key of
       Ed25519 key ->
-        CBOR.encodeInt 6
-          <> CBOR.encodeInt (-2)
+        encodeMapKey Crv
+          <> CBOR.encodeInt 6
+          <> encodeMapKey X
           <> CBOR.encodeBytes (ByteArray.convert key)
       Ed448 key ->
-        CBOR.encodeInt 7
-          <> CBOR.encodeInt (-2)
+        encodeMapKey Crv
+          <> CBOR.encodeInt 7
+          <> encodeMapKey X
           <> CBOR.encodeBytes (ByteArray.convert key)
 
 encodeCOSEAlgorithmIdentifier :: COSEAlgorithmIdentifier -> Encoding
