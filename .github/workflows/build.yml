@@ -29,9 +29,9 @@ jobs:
         nix-shell --pure --packages cabal2nix --command "cabal2nix . > /tmp/fido2.nix.new"
         git diff --no-index fido2.nix /tmp/fido2.nix.new
 
-    - run: nix-build | tee path
+    - run: nix-build
     - uses: actions/upload-artifact@v2
       with:
         name: Coverage
-        path: "$(cat path)/share/hpc/vanilla/html/**/*"
+        path: "result/share/hpc/vanilla/html/**/*"
 
