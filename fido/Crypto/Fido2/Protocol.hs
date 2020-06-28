@@ -39,6 +39,7 @@ module Crypto.Fido2.Protocol
     UserVerificationRequirement (..),
     AuthenticatorAttachment (..),
     EncodingRules (..),
+    verify,
   )
 where
 
@@ -61,6 +62,7 @@ import Data.Aeson.Types ((.:), (.:?))
 import Data.Bifunctor (first)
 import qualified Data.Binary.Get as Binary
 import qualified Data.Bits as Bits
+import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64.URL as Base64
 import qualified Data.ByteString.Lazy as LBS
@@ -453,7 +455,7 @@ data AuthenticatorData
 
         -- Used for verifying the signature currently. Not used for attestation in
         -- our current implementation which is why this is a maybe.
-        rawData :: Maybe ByteString
+        rawData :: ByteString
       }
   deriving (Show)
 
@@ -497,8 +499,8 @@ decodeAttestationObject bs = do
   -- Pass the remaining bytes to decodeAuthenticatorData
   -- TODO maybe use the incremental API here?
   (_rest, (AttestationObjectRaw {authDataRaw, fmt, attStmt})) <- first CBOR $ CBOR.deserialiseFromBytes decodeAttestationObjectRaw (LBS.fromStrict bs)
-  (rest, _, authDataRaw) <- first Binary $ Binary.runGetOrFail decodeAuthenticatorDataRaw (LBS.fromStrict authDataRaw)
-  (_rest, authData) <- first CBOR $ CBOR.deserialiseFromBytes (decodeAuthenticatorData Nothing authDataRaw) rest
+  (rest, _, authDataRaw') <- first Binary $ Binary.runGetOrFail decodeAuthenticatorDataRaw (LBS.fromStrict authDataRaw)
+  (_rest, authData) <- first CBOR $ CBOR.deserialiseFromBytes (decodeAuthenticatorData authDataRaw authDataRaw') rest
   pure (AttestationObject authData fmt attStmt)
 
 -- Helper. TODO  come up with more consistent names for all of these things, and allow
@@ -506,13 +508,13 @@ decodeAttestationObject bs = do
 decodeAuthenticatorData' :: ByteString -> Either Error AuthenticatorData
 decodeAuthenticatorData' bs = do
   (rest, _, authDataRaw) <- first Binary $ Binary.runGetOrFail decodeAuthenticatorDataRaw (LBS.fromStrict bs)
-  (_rest, authData) <- first CBOR $ CBOR.deserialiseFromBytes (decodeAuthenticatorData (Just bs) authDataRaw) rest
+  (_rest, authData) <- first CBOR $ CBOR.deserialiseFromBytes (decodeAuthenticatorData bs authDataRaw) rest
   pure authData
 
 -- The first parameter is a maybe bytestring in case we want to save the raw data
 -- to the authenticatordata struct. This is ugly, but required because we need to
 -- compute a hash based on the raw signature of this crap.
-decodeAuthenticatorData :: Maybe ByteString -> AuthenticatorDataRaw -> Decoder s AuthenticatorData
+decodeAuthenticatorData :: ByteString -> AuthenticatorDataRaw -> Decoder s AuthenticatorData
 decodeAuthenticatorData originalBs x = do
   let userPresent = Bits.testBit (flags' x) 0
   let userVerified = Bits.testBit (flags' x) 2
@@ -588,3 +590,7 @@ instance (Aeson.GToJSON Aeson.Zero (Rep a), Generic a) => ToJSON (EncodingRules 
 
 instance (Aeson.GFromJSON Aeson.Zero (Rep a), Generic a) => FromJSON (EncodingRules a) where
   parseJSON o = EncodingRules <$> Aeson.genericParseJSON options o
+
+verify :: PublicKey -> AuthenticatorData -> ClientData -> ByteString -> Bool
+verify pub AuthenticatorData {rawData} ClientData {clientDataHash} =
+  PublicKey.verify pub (rawData <> convert clientDataHash)
