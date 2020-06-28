@@ -91,4 +91,6 @@ test-suite tests
     filepath,
     QuickCheck,
     hspec,
-    cborg
+    cborg,
+    cryptonite,
+    serialise

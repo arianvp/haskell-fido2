@@ -22,7 +22,8 @@ mkDerivation {
     transformers uuid wai wai-middleware-static warp
   ];
   testHaskellDepends = [
-    aeson base bytestring cborg directory filepath hspec QuickCheck
+    aeson base bytestring cborg cryptonite directory filepath hspec
+    QuickCheck
   ];
   license = "unknown";
   hydraPlatforms = stdenv.lib.platforms.none;

@@ -7,13 +7,18 @@
 module Crypto.Fido2.PublicKey
   ( COSEAlgorithmIdentifier (..),
     ECDSAIdentifier (..),
-    PublicKey,
+    CurveIdentifier (..),
+    PublicKey (..),
+    EdDSAKey (..),
+    ECDSAKey (..),
     decodePublicKey,
     encodePublicKey,
+    toCurve,
     verify,
   )
 where
 
+import Codec.Serialise.Class(encode, decode, Serialise)
 import qualified Codec.CBOR.Decoding as CBOR
 import Codec.CBOR.Decoding (Decoder)
 import qualified Codec.CBOR.Encoding as CBOR
@@ -23,12 +28,10 @@ import Crypto.Error (CryptoFailable (CryptoFailed, CryptoPassed))
 import qualified Crypto.Hash.Algorithms as Hash
 import Crypto.Number.Serialize (i2osp, os2ip)
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
-import qualified Crypto.PubKey.ECC.Generate as ECC
 import qualified Crypto.PubKey.ECC.Prim as ECC
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
-import Crypto.Random (drgNewSeed, seedFromInteger, withDRG)
 import qualified Data.ASN1.BinaryEncoding as ASN1
 import qualified Data.ASN1.Encoding as ASN1
 import qualified Data.ASN1.Prim as ASN1
@@ -36,7 +39,6 @@ import Data.Aeson.Types (ToJSON (toJSON))
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteArray as ByteArray
 import Data.ByteString (ByteString)
-import Test.QuickCheck (Arbitrary, Gen, arbitrary, elements, oneof)
 
 data ECDSAIdentifier
   = ES256
@@ -44,16 +46,14 @@ data ECDSAIdentifier
   | ES512
   deriving (Show, Eq)
 
-instance Arbitrary ECDSAIdentifier where
-  arbitrary = elements [ES256, ES384, ES512]
-
 data COSEAlgorithmIdentifier
   = ECDSAIdentifier ECDSAIdentifier
   | EdDSA
   deriving (Show, Eq)
 
-instance Arbitrary COSEAlgorithmIdentifier where
-  arbitrary = oneof [pure EdDSA, arbitrary]
+instance Serialise COSEAlgorithmIdentifier where
+  encode = encodeCOSEAlgorithmIdentifier
+  decode = decodeCOSEAlgorithmIdentifier
 
 -- All CBOR is encoded using
 -- https://fidoalliance.org/specs/fido-v2.0-id-20180227/fido-client-to-authenticator-protocol-v2.0-id-20180227.html#ctap2-canonical-cbor-encoding-form
@@ -82,38 +82,8 @@ data EdDSAKey
   | Ed448 Ed448.PublicKey
   deriving (Eq, Show)
 
-instance Arbitrary EdDSAKey where
-  arbitrary =
-    oneof
-      [ Ed25519 <$> randomEd25519PublicKey,
-        Ed448 <$> randomEd448PublicKey
-      ]
-
-randomEd25519PublicKey :: Gen Ed25519.PublicKey
-randomEd25519PublicKey = do
-  rng <- drgNewSeed . seedFromInteger <$> arbitrary
-  let (a, _) = withDRG rng (Ed25519.toPublic <$> Ed25519.generateSecretKey)
-  pure a
-
-randomEd448PublicKey :: Gen Ed448.PublicKey
-randomEd448PublicKey = do
-  rng <- drgNewSeed . seedFromInteger <$> arbitrary
-  let (a, _) = withDRG rng (Ed448.toPublic <$> Ed448.generateSecretKey)
-  pure a
-
-randomECDSAPublicKey :: Gen (CurveIdentifier, ECC.Point)
-randomECDSAPublicKey = do
-  curveIdentifier <- arbitrary
-  let curve = toCurve curveIdentifier
-  rng <- drgNewSeed . seedFromInteger <$> arbitrary
-  let ((ECDSA.PublicKey _ point, _), _) = withDRG rng (ECC.generate curve)
-  pure (curveIdentifier, point)
-
 -- Curves supported by us
 data CurveIdentifier = P256 | P384 | P521 deriving (Eq, Show)
-
-instance Arbitrary CurveIdentifier where
-  arbitrary = elements [P256, P384, P521]
 
 toCurve :: CurveIdentifier -> ECC.Curve
 toCurve P256 = ECC.getCurveByName ECC.SEC_p256r1
@@ -122,23 +92,16 @@ toCurve P521 = ECC.getCurveByName ECC.SEC_p521r1
 
 data ECDSAKey = ECDSAKey ECDSAIdentifier CurveIdentifier ECC.Point deriving (Eq, Show)
 
-instance Arbitrary ECDSAKey where
-  arbitrary =
-    oneof
-      [ uncurry (ECDSAKey ES256) <$> randomECDSAPublicKey,
-        uncurry (ECDSAKey ES384) <$> randomECDSAPublicKey,
-        uncurry (ECDSAKey ES512) <$> randomECDSAPublicKey
-      ]
-
 data PublicKey
   = EdDSAPublicKey EdDSAKey
   | ECDSAPublicKey ECDSAKey
   deriving (Show, Eq)
 
-instance Arbitrary PublicKey where
-  arbitrary = oneof [EdDSAPublicKey <$> arbitrary, ECDSAPublicKey <$> arbitrary]
-
 data KeyType = OKP | ECC
+
+instance Serialise KeyType where
+  decode = decodeKeyType
+  encode = encodeKeyType
 
 decodeKeyType :: Decoder s KeyType
 decodeKeyType = do
@@ -152,6 +115,11 @@ encodeKeyType :: KeyType -> Encoding
 encodeKeyType kty = CBOR.encodeInt $ case kty of
   OKP -> 1
   ECC -> 2
+
+
+instance Serialise PublicKey where
+  decode = decodePublicKey
+  encode = encodePublicKey
 
 -- | The credential public key encoded in COSE_Key format, as defined in Section 7
 -- of [RFC8152], using the CTAP2 canonical CBOR encoding form. The
@@ -168,7 +136,7 @@ decodePublicKey :: Decoder s PublicKey
 decodePublicKey = do
   _n <- CBOR.decodeMapLenCanonical
   decodeMapKey Kty
-  kty <- decodeKeyType
+  kty <- decode
   case kty of
     OKP -> EdDSAPublicKey <$> decodeEdDSAKey
     ECC -> ECDSAPublicKey <$> decodeECDSAPublicKey
@@ -254,9 +222,9 @@ encodePublicKey :: PublicKey -> Encoding
 encodePublicKey (ECDSAPublicKey (ECDSAKey alg curve point)) =
   CBOR.encodeMapLen 5
     <> encodeMapKey Kty
-    <> encodeKeyType ECC
+    <> encode ECC
     <> encodeMapKey Alg
-    <> encodeCOSEAlgorithmIdentifier (ECDSAIdentifier alg)
+    <> encode (ECDSAIdentifier alg)
     <> encodeMapKey Crv
     <> encodeCurveIdentifier curve
     <> ( case point of
