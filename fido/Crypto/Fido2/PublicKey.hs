@@ -6,6 +6,7 @@
 -- | Include
 module Crypto.Fido2.PublicKey
   ( COSEAlgorithmIdentifier (..),
+    ECDSAIdentifier (..),
     PublicKey,
     decodePublicKey,
     encodePublicKey,
