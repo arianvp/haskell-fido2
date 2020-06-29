@@ -7,10 +7,10 @@
 module Crypto.Fido2.PublicKey
   ( COSEAlgorithmIdentifier (..),
     ECDSAIdentifier (..),
-    CurveIdentifier (..),
-    PublicKey (..),
     EdDSAKey (..),
     ECDSAKey (..),
+    CurveIdentifier (..),
+    PublicKey (..),
     decodePublicKey,
     encodePublicKey,
     toCurve,
@@ -18,11 +18,11 @@ module Crypto.Fido2.PublicKey
   )
 where
 
-import Codec.Serialise.Class(encode, decode, Serialise)
 import qualified Codec.CBOR.Decoding as CBOR
 import Codec.CBOR.Decoding (Decoder)
 import qualified Codec.CBOR.Encoding as CBOR
 import Codec.CBOR.Encoding (Encoding)
+import Codec.Serialise.Class (Serialise, decode, encode)
 import Control.Monad (when)
 import Crypto.Error (CryptoFailable (CryptoFailed, CryptoPassed))
 import qualified Crypto.Hash.Algorithms as Hash
@@ -115,7 +115,6 @@ encodeKeyType :: KeyType -> Encoding
 encodeKeyType kty = CBOR.encodeInt $ case kty of
   OKP -> 1
   ECC -> 2
-
 
 instance Serialise PublicKey where
   decode = decodePublicKey

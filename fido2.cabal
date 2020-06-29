@@ -96,4 +96,7 @@ test-suite tests
     cborg,
     cborg-json,
     cryptonite,
-    serialise
+    serialise,
+    quickcheck-instances,
+    asn1-encoding,
+    memory
