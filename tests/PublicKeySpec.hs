@@ -9,6 +9,7 @@ module PublicKeySpec
 where
 
 import qualified Codec.CBOR.Encoding as CBOR
+import qualified Codec.CBOR.FlatTerm as FlatTerm
 import qualified Codec.CBOR.JSON as JSON
 import qualified Codec.CBOR.Read as Read
 import qualified Codec.CBOR.Write as Write
@@ -31,7 +32,7 @@ import qualified Data.Aeson as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Test.Hspec
-import Test.QuickCheck ((===), Arbitrary, Gen, arbitrary, elements, frequency, oneof, property)
+import Test.QuickCheck (counterexample, (===), (==>), Arbitrary, Gen, arbitrary, elements, frequency, oneof, property)
 import Test.QuickCheck.Instances.ByteString
 
 instance Arbitrary ECDSAIdentifier where
@@ -42,7 +43,6 @@ instance Arbitrary COSEAlgorithmIdentifier where
 
 instance Arbitrary EdDSAKey where
   arbitrary = Ed25519 . Ed25519.toPublic <$> randomEd25519Key
-     
 
 instance Arbitrary ECDSAKey where
   arbitrary =
@@ -130,6 +130,14 @@ spec = do
           not
             $ verify (getPublicKey alg keyPair) bytes
             $ ASN1.encodeASN1' ASN1.DER [ASN1.Start ASN1.Sequence, ASN1.IntVal r, ASN1.IntVal s]
+      it "`alg` implies `crv`" $ property $ \(key :: ECDSAKey) ->
+        -- TODO: Make the test fail during signature; not during deserializaiton
+        -- then later make the illegal state irrepresentable
+        (alg key == ES256 && crv key /= P256)
+          ==> let x = FlatTerm.toFlatTerm . Serialise.encode . ECDSAPublicKey $ key
+               in counterexample (show x) $ case FlatTerm.fromFlatTerm @PublicKey Serialise.decode x of
+                    Left _ -> True
+                    Right _ -> False
   describe "COSEAlgorithmIdentifier" $ do
     roundtrips @COSEAlgorithmIdentifier
     it "fails to decode unspported COSEAlgorithmIdentifiers" $ do

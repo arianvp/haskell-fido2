@@ -15,6 +15,8 @@ module Crypto.Fido2.PublicKey
     encodePublicKey,
     toCurve,
     verify,
+    alg,
+    crv,
   )
 where
 
@@ -93,6 +95,12 @@ data PublicKey
   = EdDSAPublicKey EdDSAKey
   | ECDSAPublicKey ECDSAKey
   deriving (Show, Eq)
+
+crv :: ECDSAKey -> CurveIdentifier
+crv (ECDSAKey _ crv _)  = crv
+
+alg :: ECDSAKey -> ECDSAIdentifier
+alg (ECDSAKey alg _ _) = alg
 
 data KeyType = OKP | ECC
 
