@@ -34,6 +34,7 @@ then haskellPackages.fido2.env.overrideAttrs (
       pkgs.fd
       pkgs.ormolu
       pkgs.ghcid
+      pkgs.hlint
       haskellPackages.ghcide
     ];
   }

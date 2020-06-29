@@ -41,11 +41,8 @@ instance Arbitrary COSEAlgorithmIdentifier where
   arbitrary = frequency [(1, pure EdDSA), (3, ECDSAIdentifier <$> arbitrary)]
 
 instance Arbitrary EdDSAKey where
-  arbitrary =
-    oneof
-      [ Ed25519 . Ed25519.toPublic <$> randomEd25519Key,
-        Ed448 . Ed448.toPublic <$> randomEd448Key
-      ]
+  arbitrary = Ed25519 . Ed25519.toPublic <$> randomEd25519Key
+     
 
 instance Arbitrary ECDSAKey where
   arbitrary =
@@ -68,12 +65,6 @@ randomEd25519Key :: Gen Ed25519.SecretKey
 randomEd25519Key = do
   rng <- Random.drgNewSeed . Random.seedFromInteger <$> arbitrary
   let (a, _) = Random.withDRG rng Ed25519.generateSecretKey
-  pure a
-
-randomEd448Key :: Gen Ed448.SecretKey
-randomEd448Key = do
-  rng <- Random.drgNewSeed . Random.seedFromInteger <$> arbitrary
-  let (a, _) = Random.withDRG rng Ed448.generateSecretKey
   pure a
 
 newtype ECDSAKeyPair = ECDSAKeyPair (CurveIdentifier, (ECDSA.PublicKey, ECDSA.PrivateKey)) deriving (Eq, Show)

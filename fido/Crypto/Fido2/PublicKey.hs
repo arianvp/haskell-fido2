@@ -31,7 +31,6 @@ import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import qualified Crypto.PubKey.ECC.Prim as ECC
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
-import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Data.ASN1.BinaryEncoding as ASN1
 import qualified Data.ASN1.Encoding as ASN1
 import qualified Data.ASN1.Prim as ASN1
@@ -77,9 +76,7 @@ instance ToJSON COSEAlgorithmIdentifier where
   toJSON (ECDSAIdentifier ES512) = Aeson.Number (-36)
   toJSON EdDSA = Aeson.Number (-8)
 
-data EdDSAKey
-  = Ed25519 Ed25519.PublicKey
-  | Ed448 Ed448.PublicKey
+data EdDSAKey = Ed25519 Ed25519.PublicKey
   deriving (Eq, Show)
 
 -- Curves supported by us
@@ -154,10 +151,6 @@ decodeEdDSAKey = do
       case Ed25519.publicKey x of
         CryptoFailed e -> fail (show e)
         CryptoPassed a -> pure $ Ed25519 a
-    7 ->
-      case Ed448.publicKey x of
-        CryptoFailed e -> fail (show e)
-        CryptoPassed a -> pure $ Ed448 a
     _ -> fail "Unsupported `crv`"
 
 encodeCurveIdentifier :: CurveIdentifier -> Encoding
@@ -246,11 +239,6 @@ encodePublicKey (EdDSAPublicKey key) =
           <> CBOR.encodeInt 6
           <> encodeMapKey X
           <> CBOR.encodeBytes (ByteArray.convert key)
-      Ed448 key ->
-        encodeMapKey Crv
-          <> CBOR.encodeInt 7
-          <> encodeMapKey X
-          <> CBOR.encodeBytes (ByteArray.convert key)
 
 encodeCOSEAlgorithmIdentifier :: COSEAlgorithmIdentifier -> Encoding
 encodeCOSEAlgorithmIdentifier x = CBOR.encodeInt $ case x of
@@ -285,8 +273,4 @@ verify key msg sig =
     EdDSAPublicKey (Ed25519 key) ->
       case Ed25519.signature sig of
         CryptoPassed sig -> Ed25519.verify key msg sig
-        CryptoFailed _ -> False
-    EdDSAPublicKey (Ed448 key) ->
-      case Ed448.signature sig of
-        CryptoPassed sig -> Ed448.verify key msg sig
         CryptoFailed _ -> False
