@@ -3,7 +3,10 @@
 module PublicKeySpec (spec) where
 
 import qualified Codec.CBOR.Encoding as CBOR
+import qualified Codec.CBOR.JSON as JSON
 import qualified Codec.CBOR.Write as Write
+import qualified Codec.CBOR.Read as Read
+import qualified Data.Aeson as Aeson
 import qualified Codec.Serialise as Serialise
 import Crypto.Fido2.PublicKey
 import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
@@ -13,14 +16,14 @@ import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.Random as Random
 import Test.Hspec
-import Test.QuickCheck ((===), Arbitrary, Gen, arbitrary, elements, oneof, property)
+import Test.QuickCheck ((===), Arbitrary, Gen, frequency, arbitrary, elements, oneof, property)
 import Data.Either (isLeft)
 
 instance Arbitrary ECDSAIdentifier where
   arbitrary = elements [ES256, ES384, ES512]
 
 instance Arbitrary COSEAlgorithmIdentifier where
-  arbitrary = oneof [pure EdDSA, arbitrary]
+  arbitrary = frequency  [(1, pure EdDSA), (3, ECDSAIdentifier <$> arbitrary)]
 
 instance Arbitrary EdDSAKey where
   arbitrary =
@@ -73,3 +76,16 @@ spec = do
   it "fails to decode unspported COSEAlgorithmIdentifiers" $  do
     let bs = Write.toLazyByteString (CBOR.encodeInt (-300))
     Serialise.deserialiseOrFail @COSEAlgorithmIdentifier bs `shouldSatisfy` isLeft
+
+  it "can encode COSEAlgorithmIdentifier as JSON" $ do
+    property $ \(alg :: COSEAlgorithmIdentifier) ->
+      let
+        bs = Serialise.serialise alg
+        rs = Read.deserialiseFromBytes (JSON.decodeValue False) bs
+        alg' = Aeson.toJSON alg
+      in
+        pure (Aeson.toJSON alg) == (snd <$> rs)
+
+
+
+

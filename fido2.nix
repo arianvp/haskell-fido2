@@ -1,9 +1,10 @@
 { mkDerivation, aeson, aeson-qq, asn1-encoding, base
-, base64-bytestring, binary, bytestring, cborg, containers, cookie
-, cryptonite, directory, filepath, hspec, http-types, memory, mtl
-, QuickCheck, scientific, scotty, serialise, sqlite-simple, stdenv
-, stm, text, transformers, unordered-containers, uuid, vector, wai
-, wai-middleware-static, warp, x509
+, base64-bytestring, binary, bytestring, cborg, cborg-json
+, containers, cookie, cryptonite, directory, filepath, hspec
+, http-types, memory, mtl, QuickCheck, scientific, scotty
+, serialise, sqlite-simple, stdenv, stm, text, transformers
+, unordered-containers, uuid, vector, wai, wai-middleware-static
+, warp, x509
 }:
 mkDerivation {
   pname = "fido2";
@@ -22,8 +23,8 @@ mkDerivation {
     transformers uuid wai wai-middleware-static warp
   ];
   testHaskellDepends = [
-    aeson base bytestring cborg cryptonite directory filepath hspec
-    QuickCheck
+    aeson base bytestring cborg cborg-json cryptonite directory
+    filepath hspec QuickCheck serialise
   ];
   license = "unknown";
   hydraPlatforms = stdenv.lib.platforms.none;
