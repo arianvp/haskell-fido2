@@ -23,7 +23,6 @@ import qualified Crypto.PubKey.ECC.ECDSA as ECDSA
 import qualified Crypto.PubKey.ECC.Generate as ECC
 import qualified Crypto.PubKey.ECC.Types as ECC
 import qualified Crypto.PubKey.Ed25519 as Ed25519
-import qualified Crypto.PubKey.Ed448 as Ed448
 import qualified Crypto.Random as Random
 import qualified Data.ASN1.BinaryEncoding as ASN1
 import qualified Data.ASN1.Encoding as ASN1
@@ -31,9 +30,9 @@ import qualified Data.ASN1.Prim as ASN1
 import qualified Data.Aeson as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
-import Test.Hspec
-import Test.QuickCheck (counterexample, (===), (==>), Arbitrary, Gen, arbitrary, elements, frequency, oneof, property)
-import Test.QuickCheck.Instances.ByteString
+import Test.Hspec(shouldSatisfy, describe, it, SpecWith)
+import Test.QuickCheck ((==>), Arbitrary, Gen, arbitrary, counterexample, elements, frequency, oneof, property)
+import Test.QuickCheck.Instances.ByteString()
 
 instance Arbitrary ECDSAIdentifier where
   arbitrary = elements [ES256, ES384, ES512]
@@ -73,10 +72,10 @@ privateKey :: ECDSAKeyPair -> ECDSA.PrivateKey
 privateKey (ECDSAKeyPair (_, (_, priv))) = priv
 
 getPublicKey :: ECDSAIdentifier -> ECDSAKeyPair -> PublicKey
-getPublicKey alg (ECDSAKeyPair (crv, (pub, priv))) = ECDSAPublicKey $ ECDSAKey alg crv (ECDSA.public_q pub)
+getPublicKey alg (ECDSAKeyPair (crv, (pub, _))) = ECDSAPublicKey $ ECDSAKey alg crv (ECDSA.public_q pub)
 
 getPoint :: ECDSAKeyPair -> (CurveIdentifier, ECC.Point)
-getPoint (ECDSAKeyPair (ident, (pub, priv))) = (ident, ECDSA.public_q pub)
+getPoint (ECDSAKeyPair (ident, (pub, _))) = (ident, ECDSA.public_q pub)
 
 instance Arbitrary ECDSAKeyPair where
   arbitrary = ECDSAKeyPair <$> randomECDSAKey
