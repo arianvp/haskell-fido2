@@ -19,12 +19,13 @@ mkDerivation {
   ];
   executableHaskellDepends = [
     aeson aeson-qq base base64-bytestring bytestring cborg containers
-    cookie cryptonite http-types mtl scotty sqlite-simple stm text
-    transformers uuid wai wai-middleware-static warp
+    cookie cryptonite http-types mtl scotty serialise sqlite-simple stm
+    text transformers uuid wai wai-middleware-static warp
   ];
   testHaskellDepends = [
-    aeson base bytestring cborg cborg-json cryptonite directory
-    filepath hspec memory QuickCheck quickcheck-instances serialise
+    aeson asn1-encoding base bytestring cborg cborg-json cryptonite
+    directory filepath hspec memory QuickCheck quickcheck-instances
+    serialise
   ];
   license = "unknown";
   hydraPlatforms = stdenv.lib.platforms.none;
