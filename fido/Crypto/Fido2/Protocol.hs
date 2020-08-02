@@ -5,7 +5,6 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StrictData #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -31,7 +30,7 @@ module Crypto.Fido2.Protocol
     WebauthnType (..),
     UserId (..),
     newUserId,
-    Challenge,
+    Challenge(..),
     newChallenge,
     Timeout (..),
     PublicKeyCredentialType (..),

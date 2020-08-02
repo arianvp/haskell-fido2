@@ -85,7 +85,9 @@ test-suite tests
   hs-source-dirs: tests
   main-is: Spec.hs
   other-modules:
-    PublicKeySpec
+    PublicKeySpec,
+    AttestationSpec,
+    Util
   build-depends:
     aeson,
     bytestring,
@@ -100,4 +102,5 @@ test-suite tests
     serialise,
     quickcheck-instances,
     asn1-encoding,
+    text,
     memory

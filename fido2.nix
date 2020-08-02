@@ -25,7 +25,7 @@ mkDerivation {
   testHaskellDepends = [
     aeson asn1-encoding base bytestring cborg cborg-json cryptonite
     directory filepath hspec memory QuickCheck quickcheck-instances
-    serialise
+    serialise text
   ];
   license = "unknown";
   hydraPlatforms = stdenv.lib.platforms.none;

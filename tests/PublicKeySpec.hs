@@ -4,10 +4,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module PublicKeySpec
-  ( spec,
-  )
-where
+module PublicKeySpec (spec) where
 
 import qualified Codec.CBOR.Encoding as CBOR
 import qualified Codec.CBOR.FlatTerm as FlatTerm
@@ -15,7 +12,6 @@ import qualified Codec.CBOR.JSON as JSON
 import qualified Codec.CBOR.Read as Read
 import qualified Codec.CBOR.Write as Write
 import qualified Codec.Serialise as Serialise
-import qualified Codec.Serialise.Properties as Serialise.Properties
 import Crypto.Fido2.PublicKey
 import Crypto.Hash (SHA384 (SHA384))
 import Crypto.Hash.Algorithms (SHA256 (SHA256))
@@ -35,6 +31,7 @@ import Data.Either (isLeft)
 import Test.Hspec (SpecWith, describe, it, shouldSatisfy)
 import Test.QuickCheck ((.&&.), (===), (==>), Arbitrary, Gen, arbitrary, counterexample, elements, frequency, oneof, property, total)
 import Test.QuickCheck.Instances.ByteString ()
+import Util (roundtrips)
 
 instance Arbitrary CurveIdentifier where
   arbitrary = elements [P256, P384, P521]
@@ -87,14 +84,6 @@ randomECDSAKey = do
 
 spec :: SpecWith ()
 spec = do
-  let roundtrips :: forall a. (Eq a, Show a, Serialise.Serialise a, Arbitrary a) => SpecWith ()
-      roundtrips = do
-        it "serialiseIdentity" $ property $ \(key :: a) ->
-          Serialise.Properties.serialiseIdentity key
-        it "flatTermIdentity" $ property $ \(key :: a) ->
-          Serialise.Properties.flatTermIdentity key
-        it "hasValidFlatTerm" $ property $ \(key :: a) ->
-          Serialise.Properties.hasValidFlatTerm key
   describe "PublicKey" $ do
     roundtrips @PublicKey
     describe "EdDSA" $ do
