@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module PublicKeySpec
@@ -30,9 +31,13 @@ import qualified Data.ASN1.Prim as ASN1
 import qualified Data.Aeson as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
-import Test.Hspec(shouldSatisfy, describe, it, SpecWith)
-import Test.QuickCheck ((==>), Arbitrary, Gen, arbitrary, counterexample, elements, frequency, oneof, property)
-import Test.QuickCheck.Instances.ByteString()
+import Data.Either (isLeft)
+import Test.Hspec (SpecWith, describe, it, shouldSatisfy)
+import Test.QuickCheck ((===), (==>), Arbitrary, Gen, arbitrary, counterexample, elements, frequency, oneof, property)
+import Test.QuickCheck.Instances.ByteString ()
+
+instance Arbitrary CurveIdentifier where
+  arbitrary = elements [P256, P384, P521]
 
 instance Arbitrary ECDSAIdentifier where
   arbitrary = elements [ES256, ES384, ES512]
@@ -44,15 +49,7 @@ instance Arbitrary EdDSAKey where
   arbitrary = Ed25519 . Ed25519.toPublic <$> randomEd25519Key
 
 instance Arbitrary ECDSAKey where
-  arbitrary =
-    oneof
-      [ uncurry (ECDSAKey ES256) . getPoint <$> arbitrary,
-        uncurry (ECDSAKey ES384) . getPoint <$> arbitrary,
-        uncurry (ECDSAKey ES512) . getPoint <$> arbitrary
-      ]
-
-instance Arbitrary CurveIdentifier where
-  arbitrary = elements [P256, P384, P521]
+  arbitrary = getPublicKey <$> arbitrary
 
 instance Arbitrary PublicKey where
   arbitrary = oneof [EdDSAPublicKey <$> arbitrary, ECDSAPublicKey <$> arbitrary]
@@ -66,24 +63,24 @@ randomEd25519Key = do
   let (a, _) = Random.withDRG rng Ed25519.generateSecretKey
   pure a
 
-newtype ECDSAKeyPair = ECDSAKeyPair (CurveIdentifier, (ECDSA.PublicKey, ECDSA.PrivateKey)) deriving (Eq, Show)
+newtype ECDSAKeyPair = ECDSAKeyPair (ECDSAIdentifier, (ECDSA.PublicKey, ECDSA.PrivateKey)) deriving (Eq, Show)
 
 privateKey :: ECDSAKeyPair -> ECDSA.PrivateKey
 privateKey (ECDSAKeyPair (_, (_, priv))) = priv
 
-getPublicKey :: ECDSAIdentifier -> ECDSAKeyPair -> PublicKey
-getPublicKey alg (ECDSAKeyPair (crv, (pub, _))) = ECDSAPublicKey $ ECDSAKey alg crv (ECDSA.public_q pub)
+getPublicKey :: ECDSAKeyPair -> ECDSAKey
+getPublicKey (ECDSAKeyPair (alg, (pub, _))) = ECDSAKey alg (ECDSA.public_q pub)
 
-getPoint :: ECDSAKeyPair -> (CurveIdentifier, ECC.Point)
-getPoint (ECDSAKeyPair (ident, (pub, _))) = (ident, ECDSA.public_q pub)
+getPoint :: ECDSAKeyPair -> ECC.Point
+getPoint (ECDSAKeyPair (ident, (pub, _))) = ECDSA.public_q pub
 
 instance Arbitrary ECDSAKeyPair where
   arbitrary = ECDSAKeyPair <$> randomECDSAKey
 
-randomECDSAKey :: Gen (CurveIdentifier, (ECDSA.PublicKey, ECDSA.PrivateKey))
+randomECDSAKey :: Gen (ECDSAIdentifier, (ECDSA.PublicKey, ECDSA.PrivateKey))
 randomECDSAKey = do
   curveIdentifier <- arbitrary
-  let curve = toCurve curveIdentifier
+  let curve = toCurve (curveForAlg curveIdentifier)
   rng <- Random.drgNewSeed . Random.seedFromInteger <$> arbitrary
   let (x, _) = Random.withDRG rng (ECC.generate curve)
   pure (curveIdentifier, x)
@@ -110,33 +107,35 @@ spec = do
     describe "ECDSA" $ do
       it "accepts valid signatures"
         $ property
-        $ \(keyPair :: ECDSAKeyPair, bytes :: ByteString, alg :: ECDSAIdentifier, seed :: Integer) ->
+        $ \(keyPair :: ECDSAKeyPair, bytes :: ByteString, seed :: Integer) ->
           let drg = Random.drgNewSeed . Random.seedFromInteger $ seed
-              (ECDSA.Signature r s, _) = case alg of
+              (ECDSA.Signature r s, _) = case alg (getPublicKey keyPair) of
                 ES256 -> Random.withDRG drg $ ECDSA.sign (privateKey keyPair) SHA256 bytes
                 ES384 -> Random.withDRG drg $ ECDSA.sign (privateKey keyPair) SHA384 bytes
                 ES512 -> Random.withDRG drg $ ECDSA.sign (privateKey keyPair) SHA512 bytes
-           in verify (getPublicKey alg keyPair) bytes (ASN1.encodeASN1' ASN1.DER [ASN1.Start ASN1.Sequence, ASN1.IntVal r, ASN1.IntVal s, ASN1.End ASN1.Sequence])
+           in verify (ECDSAPublicKey $ getPublicKey keyPair) bytes (ASN1.encodeASN1' ASN1.DER [ASN1.Start ASN1.Sequence, ASN1.IntVal r, ASN1.IntVal s, ASN1.End ASN1.Sequence])
       it "rejects invalid signatures"
         $ property
-        $ \(keyPair :: ECDSAKeyPair, bytes :: ByteString, alg :: ECDSAIdentifier, r, s) ->
+        $ \(keyPair :: ECDSAKeyPair, bytes :: ByteString, r, s) ->
           not
-            $ verify (getPublicKey alg keyPair) bytes
+            $ verify (ECDSAPublicKey $ getPublicKey keyPair) bytes
             $ ASN1.encodeASN1' ASN1.DER [ASN1.Start ASN1.Sequence, ASN1.IntVal r, ASN1.IntVal s, ASN1.End ASN1.Sequence]
       it "rejects invalid ASN.1"
         $ property
-        $ \(keyPair :: ECDSAKeyPair, bytes :: ByteString, alg :: ECDSAIdentifier, r, s) ->
+        $ \(keyPair :: ECDSAKeyPair, bytes :: ByteString, r, s) ->
           not
-            $ verify (getPublicKey alg keyPair) bytes
+            $ verify (ECDSAPublicKey $ getPublicKey keyPair) bytes
             $ ASN1.encodeASN1' ASN1.DER [ASN1.Start ASN1.Sequence, ASN1.IntVal r, ASN1.IntVal s]
-      it "`alg` implies `crv`" $ property $ \(key :: ECDSAKey) ->
-        -- TODO: Make the test fail during signature; not during deserializaiton
-        -- then later make the illegal state irrepresentable
-        (alg key == ES256 && crv key /= P256)
-          ==> let x = FlatTerm.toFlatTerm . Serialise.encode . ECDSAPublicKey $ key
-               in counterexample (show x) $ case FlatTerm.fromFlatTerm @PublicKey Serialise.decode x of
-                    Left _ -> True
-                    Right _ -> False
+      -- Though COSE allows us to pick `alg` and `crv` independently, Webauthn wants us
+      -- to let `alg` imply `crv`
+      it "`alg` implies `crv`" $ property $ \(key :: ECDSAKey, FlatTerm.toFlatTerm . Serialise.encode @CurveIdentifier -> [crv]) -> do
+        -- in order to test this, we encode a public key where the alg and the crv do not match
+        case (FlatTerm.toFlatTerm . Serialise.encode . ECDSAPublicKey $ key) of
+          (map : ktyKey : ktyVal : algKey : algVal : crvKey : crvVal : xs) ->
+            crvVal /= crv
+              ==> let key' = map : ktyKey : ktyVal : algKey : algVal : crvKey : crv : xs
+                   in isLeft (FlatTerm.fromFlatTerm (Serialise.decode @PublicKey) key')
+          _ -> error "Didnt match shape"
   describe "COSEAlgorithmIdentifier" $ do
     roundtrips @COSEAlgorithmIdentifier
     it "fails to decode unspported COSEAlgorithmIdentifiers" $ do

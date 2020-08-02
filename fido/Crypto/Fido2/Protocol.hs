@@ -534,7 +534,7 @@ decodeAuthenticatorData originalBs x = do
 -- attestedcredentialdataheader knallen we in deze
 decodeAttestedCredentialData :: AttestedCredentialDataHeader -> Decoder s AttestedCredentialData
 decodeAttestedCredentialData (AttestedCredentialDataHeader aaguid credentialId) = do
-  AttestedCredentialData aaguid (CredentialId (URLEncodedBase64 credentialId)) <$> PublicKey.decodePublicKey
+  AttestedCredentialData aaguid (CredentialId (URLEncodedBase64 credentialId)) <$> Serialise.decode
 
 decodeAuthenticatorDataRaw :: Binary.Get AuthenticatorDataRaw
 decodeAuthenticatorDataRaw = do

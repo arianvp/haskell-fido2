@@ -11,12 +11,11 @@ module Crypto.Fido2.PublicKey
     ECDSAKey (..),
     CurveIdentifier (..),
     PublicKey (..),
-    decodePublicKey,
-    encodePublicKey,
     toCurve,
     verify,
     alg,
     crv,
+    curveForAlg,
   )
 where
 
@@ -89,7 +88,7 @@ toCurve P256 = ECC.getCurveByName ECC.SEC_p256r1
 toCurve P384 = ECC.getCurveByName ECC.SEC_p384r1
 toCurve P521 = ECC.getCurveByName ECC.SEC_p521r1
 
-data ECDSAKey = ECDSAKey ECDSAIdentifier CurveIdentifier ECC.Point deriving (Eq, Show)
+data ECDSAKey = ECDSAKey ECDSAIdentifier ECC.Point deriving (Eq, Show)
 
 data PublicKey
   = EdDSAPublicKey EdDSAKey
@@ -97,10 +96,10 @@ data PublicKey
   deriving (Show, Eq)
 
 crv :: ECDSAKey -> CurveIdentifier
-crv (ECDSAKey _ crv _)  = crv
+crv (ECDSAKey alg _)  = curveForAlg alg
 
 alg :: ECDSAKey -> ECDSAIdentifier
-alg (ECDSAKey alg _ _) = alg
+alg (ECDSAKey alg _) = alg
 
 data KeyType = OKP | ECC
 
@@ -176,15 +175,20 @@ decodeCurveIdentifier = do
     3 -> pure $ P521
     _ -> fail "Unsupported `crv`"
 
+instance Serialise CurveIdentifier where
+  encode = encodeCurveIdentifier
+  decode = decodeCurveIdentifier
+
 decodeECDSAPublicKey :: Decoder s ECDSAKey
 decodeECDSAPublicKey = do
   decodeMapKey Alg
   alg <- decodeCOSEAlgorithmIdentifier
-  hash <- case alg of
+  alg' <- case alg of
     ECDSAIdentifier x -> pure x
     _ -> fail "Unsupported `alg`"
   decodeMapKey Crv
   curve <- decodeCurveIdentifier
+  when (curve /= curveForAlg alg') $ fail "Curve must match alg. See <section>"
   decodeMapKey X
   x <- os2ip <$> CBOR.decodeBytesCanonical
   decodeMapKey Y
@@ -198,7 +202,7 @@ decodeECDSAPublicKey = do
     _ -> fail "Unexpected token type"
   let point = ECC.Point x y
   when (not (ECC.isPointValid (toCurve curve) point)) $ fail "point not on curve"
-  pure $ ECDSAKey hash curve (ECC.Point x y)
+  pure $ ECDSAKey alg' (ECC.Point x y)
 
 data MapKey = Kty | Alg | Crv | X | Y deriving (Show, Eq)
 
@@ -219,14 +223,14 @@ decodeMapKey key = do
   when (mapKeyToInt key /= key') $ fail $ "Expected " ++ show key
 
 encodePublicKey :: PublicKey -> Encoding
-encodePublicKey (ECDSAPublicKey (ECDSAKey alg curve point)) =
+encodePublicKey (ECDSAPublicKey (ECDSAKey alg point)) =
   CBOR.encodeMapLen 5
     <> encodeMapKey Kty
     <> encode ECC
     <> encodeMapKey Alg
     <> encode (ECDSAIdentifier alg)
     <> encodeMapKey Crv
-    <> encodeCurveIdentifier curve
+    <> encode (curveForAlg alg)
     <> ( case point of
            ECC.Point x y ->
              encodeMapKey X
@@ -269,8 +273,8 @@ decodeECDSASignature sigbs =
 verify :: PublicKey -> ByteString -> ByteString -> Bool
 verify key msg sig =
   case key of
-    ECDSAPublicKey (ECDSAKey alg curve point) ->
-      let key = ECDSA.PublicKey (toCurve curve) point
+    ECDSAPublicKey (ECDSAKey alg point) ->
+      let key = ECDSA.PublicKey (toCurve (curveForAlg alg)) point
        in case decodeECDSASignature sig of
             Nothing -> False
             Just sig ->
@@ -282,3 +286,8 @@ verify key msg sig =
       case Ed25519.signature sig of
         CryptoPassed sig -> Ed25519.verify key msg sig
         CryptoFailed _ -> False
+
+curveForAlg :: ECDSAIdentifier -> CurveIdentifier
+curveForAlg ES256 = P256
+curveForAlg ES384 = P384
+curveForAlg ES512 = P521

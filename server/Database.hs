@@ -16,6 +16,7 @@ where
 
 import qualified Codec.CBOR.Read as CBOR
 import qualified Codec.CBOR.Write as CBOR
+import qualified Codec.Serialise as Serialise
 import qualified Crypto.Fido2.Assertion as Assertion
 import Crypto.Fido2.Protocol
   ( CredentialId (CredentialId),
@@ -112,7 +113,7 @@ addAttestedCredentialData
       \ (?, ?, ?, ?);                                               "
       ( credentialId,
         userId,
-        CBOR.toStrictByteString (Fido2.encodePublicKey publicKey)
+        CBOR.toStrictByteString (Serialise.encode publicKey)
       )
 
 getUserByCredentialId :: Transaction -> Fido2.CredentialId -> IO (Maybe Fido2.UserId)
@@ -141,7 +142,7 @@ getCredentialsByUserId (Transaction conn) (UserId (URLEncodedBase64 userId)) = d
     mkCredential (id, publicKey) = do
       -- TODO(#22): Convert to the compressed representation so we don't need
       --  the Maybe.
-      case snd <$> CBOR.deserialiseFromBytes Fido2.decodePublicKey publicKey of
+      case snd <$> CBOR.deserialiseFromBytes Serialise.decode publicKey of
         Left _ -> Nothing
         Right publicKey ->
           pure $
