@@ -33,7 +33,7 @@ import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Data.Either (isLeft)
 import Test.Hspec (SpecWith, describe, it, shouldSatisfy)
-import Test.QuickCheck ((===), (==>), Arbitrary, Gen, arbitrary, counterexample, elements, frequency, oneof, property)
+import Test.QuickCheck ((.&&.), (===), (==>), Arbitrary, Gen, arbitrary, counterexample, elements, frequency, oneof, property, total)
 import Test.QuickCheck.Instances.ByteString ()
 
 instance Arbitrary CurveIdentifier where
@@ -134,7 +134,9 @@ spec = do
           (map : ktyKey : ktyVal : algKey : algVal : crvKey : crvVal : xs) ->
             crvVal /= crv
               ==> let key' = map : ktyKey : ktyVal : algKey : algVal : crvKey : crv : xs
-                   in isLeft (FlatTerm.fromFlatTerm (Serialise.decode @PublicKey) key')
+                      decoded = FlatTerm.fromFlatTerm (Serialise.decode @PublicKey) key'
+                   in case decoded of
+                        Left x -> total x
           _ -> error "Didnt match shape"
   describe "COSEAlgorithmIdentifier" $ do
     roundtrips @COSEAlgorithmIdentifier

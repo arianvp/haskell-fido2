@@ -14,7 +14,6 @@ module Crypto.Fido2.PublicKey
     toCurve,
     verify,
     alg,
-    crv,
     curveForAlg,
   )
 where
@@ -94,9 +93,6 @@ data PublicKey
   = EdDSAPublicKey EdDSAKey
   | ECDSAPublicKey ECDSAKey
   deriving (Show, Eq)
-
-crv :: ECDSAKey -> CurveIdentifier
-crv (ECDSAKey alg _)  = curveForAlg alg
 
 alg :: ECDSAKey -> ECDSAIdentifier
 alg (ECDSAKey alg _) = alg
@@ -187,7 +183,7 @@ decodeECDSAPublicKey = do
     ECDSAIdentifier x -> pure x
     _ -> fail "Unsupported `alg`"
   decodeMapKey Crv
-  curve <- decodeCurveIdentifier
+  curve <- decode
   when (curve /= curveForAlg alg') $ fail "Curve must match alg. See <section>"
   decodeMapKey X
   x <- os2ip <$> CBOR.decodeBytesCanonical
