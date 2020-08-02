@@ -135,20 +135,14 @@ main = Hspec.hspec $ do
       ignoreDecodedValue
   describe "PublicKey" $ PublicKeySpec.spec
   describe "Attestation" $ do
-    it "fails if type is wrong" $
-      let resp =
-            Fido2.AuthenticatorAttestationResponse
-              { Fido2.clientData =
-                  Fido2.ClientData
-                    { Fido2.typ = Fido2.Get,
-                      Fido2.challenge = undefined,
-                      Fido2.origin = undefined,
-                      Fido2.clientDataHash = undefined
-                    },
-                Fido2.attestationObject = undefined
-              }
-       in case Fido2.verifyAttestationResponse undefined undefined undefined undefined resp of
-            Left x -> x `shouldBe` Fido2.InvalidWebauthnType
+    it "fails if type is wrong" $ property $
+      \(resp', clientData) ->
+        let resp =
+              (resp' :: Fido2.AuthenticatorAttestationResponse)
+                { Fido2.clientData = clientData {Fido2.typ = Fido2.Get}
+                }
+         in case Fido2.verifyAttestationResponse undefined undefined undefined undefined resp of
+              Left x -> x === Fido2.InvalidWebauthnType
     it "fails if challenges do not match" $ property $
       \( coerce @ByteString -> c1,
          coerce @ByteString -> c2,
@@ -366,6 +360,7 @@ main = Hspec.hspec $ do
                         }
                  in case Fido2.verifyAttestationResponse origin rp challenge Fido2.UserVerificationPreferred resp of
                       Left x -> x === Fido2Attestation.InvalidAttestationStatement
+    -- Kinda lame. We know that show is total as it's derived
     it "Can show Error" $ property $ \(err :: Fido2Attestation.Error) -> total . show $ err
   describe "RegisterAndLogin"
     $ it "tests whether the fixed register and login responses are matching"

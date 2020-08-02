@@ -4,7 +4,10 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module PublicKeySpec (spec) where
+module PublicKeySpec
+  ( spec,
+  )
+where
 
 import qualified Codec.CBOR.Encoding as CBOR
 import qualified Codec.CBOR.FlatTerm as FlatTerm
